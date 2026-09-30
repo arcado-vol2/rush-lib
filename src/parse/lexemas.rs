@@ -63,11 +63,7 @@ pub(crate) enum BlockKind {
     Paragraph,
     List,
     Table,
-    Header1,
-    Header2,
-    Header3,
-    Header4,
-    Header5,
+    Header(u8),
     Mark,
     Comment,
     Formula,
@@ -121,21 +117,15 @@ pub(crate) enum LexemaKind {
     LinkEnd,
 }
 
-#[derive(Clone, Copy, Debug)]
-pub(crate) struct Span {
-    pub(crate) start: usize,
-    pub(crate) end: usize
-}
-
 #[derive(Debug)]
-pub(crate) struct Lexema {
+pub(crate) struct Lexema<'a> {
     pub(crate) kind: LexemaKind,
-    pub(crate) span: Span
+    pub(crate) data: &'a str
 }
 
 #[derive(Debug)]
-pub(crate) struct Block {
+pub(crate) struct Block<'a> {
     pub(crate) kind: BlockKind,
-    pub(crate) span: Span
+    pub(crate) lines: Vec<&'a str>
 }
 
