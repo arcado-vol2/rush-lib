@@ -33,6 +33,8 @@ pub(crate) const TABLE_MERGE_UP: char = '=';
 pub(crate) const NEW_LINE: char = '\n';
 pub(crate) const SHIELD: char = '_'; 
 
+
+
 pub(crate) fn is_blank(c: char) -> bool{
     matches!(c, SPACE | TAB | CR)
 }
@@ -123,9 +125,9 @@ pub(crate) struct Lexema<'a> {
     pub(crate) data: &'a str
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub(crate) struct Block<'a> {
     pub(crate) kind: BlockKind,
-    pub(crate) lines: Vec<&'a str>
+    pub(crate) lines: Vec<&'a str>,
 }
 
