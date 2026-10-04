@@ -34,7 +34,6 @@ pub(crate) const NEW_LINE: char = '\n';
 pub(crate) const SHIELD: char = '_'; 
 
 
-
 pub(crate) fn is_blank(c: char) -> bool{
     matches!(c, SPACE | TAB | CR)
 }
@@ -69,7 +68,8 @@ pub(crate) enum BlockKind {
     Mark,
     Comment,
     Formula,
-    Code
+    Code,
+    Image
 }
 
 
