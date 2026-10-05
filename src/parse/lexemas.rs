@@ -69,7 +69,7 @@ pub(crate) enum BlockKind {
     Comment,
     Formula,
     Code,
-    Image
+    Image(u16)
 }
 
 

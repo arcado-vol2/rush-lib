@@ -26,7 +26,11 @@ enum LineKind {
     Comment,
     FormulaOpen,
     FormulaClose,
-    Image,
+    List,
+    TableOpenOrFormat,
+    TableLine,
+    TableCloseOrFormat,
+    Image(u16),
     Header(u8)
 }
 
@@ -45,27 +49,37 @@ impl<'a> ClassifiedLine<'a> {
         let formated = raw.trim_matches(|c| is_blank(c));
         if formated.is_empty(){
             return Self {raw, formated, thinned: formated, kind: LineKind::Empty};
+        } else if formated.starts_with(TABLE_SEP){
+            return Self {raw, formated, thinned: formated, kind: LineKind::TableLine};
         } else if formated.starts_with(MARK) {
-            let s = &formated[1..];
+            let s = formated[1..].trim_start_matches(SPACE);
             let end = s.find(|c| is_blank(c)).unwrap_or(s.len());
             let (first_w, tail) = s.split_at(end);
             let rest = tail.trim_start_matches(|c| is_blank(c));
-            if formated.starts_with(IMG_LBRACE) && formated.ends_with(IMG_RBRACE){
-                let sep_count = formated.matches(IMG_SEP).count();
+            if s.starts_with(IMG_LBRACE) && s.ends_with(IMG_RBRACE){
+                let sep_count = s.matches(IMG_SEP).count();
+                
                 if sep_count == 1 || sep_count == 2 {
                     let thinned = 'get_first_and_last: {
-                        let mut t = formated.char_indices();
+                        let mut t = s.char_indices();
                         let first_end = match t.next(){
                             Some((_, ch)) => ch.len_utf8(),
-                            None => break 'get_first_and_last formated
+                            None => break 'get_first_and_last s
                         };
                         let Some((last_start,_)) = t.next_back() else {
-                            break  'get_first_and_last formated;
+                            break  'get_first_and_last s;
                         };
                         
-                        &formated[first_end..last_start]
+                        &s[first_end..last_start]
                     };
-                    return Self {raw, formated, thinned, kind: LineKind::Image} ;
+                    let content: Vec<&str> = thinned.split(IMG_SEP).collect();
+                    if content.len() == 3 {
+                        let (head, last) = thinned.rsplit_once(IMG_SEP).unwrap();
+                        if let Ok(scale) = last.trim().parse::<u16>() && scale > 0{
+                            return  Self {raw, formated, thinned: head, kind: LineKind::Image(scale)};
+                        }
+                    }
+                    return Self {raw, formated, thinned, kind: LineKind::Image(0)} ;
                 }
             }
             if !first_w.is_empty() {
@@ -74,20 +88,31 @@ impl<'a> ClassifiedLine<'a> {
                         return Self { raw, formated, thinned: formated, kind: LineKind::CodeClose };
                     } else if first_w.len() == 1 && first_w.starts_with(COMMENT) {
                         return Self {raw, formated, thinned: rest, kind: LineKind::Comment};
-                    } else if first_w.len() == 1 &&first_w.starts_with(FORMULA) {
+                    } else if first_w.len() == 1 && first_w.starts_with(FORMULA) {
                         return Self {raw, formated, thinned: rest, kind: LineKind::FormulaClose};
+                    } else if first_w.len() == 3 && first_w.starts_with(TABLE) {
+                        return Self {raw, formated, thinned: rest, kind: LineKind::TableCloseOrFormat};
                     } else {
                         return Self { raw, formated, thinned: rest, kind: LineKind::Regular};
                     }
-                } 
-                if first_w.chars().all(|c| c == HEADER){
-                    let header_level = first_w.chars().count().min(5) as u8;
-                    return Self { raw, formated, thinned: rest, kind: LineKind::Header(header_level)};
-                } else if first_w.len() == 2 && first_w.chars().all(|c| c == CODE) {
-                    return Self { raw, formated, thinned: rest, kind: LineKind::CodeOpen};
-                } else if first_w.len() == 1 && first_w.starts_with(FORMULA) {
-                    return Self {raw, formated, thinned: rest, kind: LineKind::FormulaOpen};
+                } else {
+                    println!("first_w: {first_w:?}, rest: {rest:?}, first_w.len(): {:?}", first_w.len());
+                    if first_w.chars().all(|c| c == HEADER){
+                        let header_level = first_w.chars().count().min(5) as u8;
+                        return Self { raw, formated, thinned: rest, kind: LineKind::Header(header_level)};
+                    } 
+                    else if first_w.len() == 1 && first_w.starts_with(|c| c == BULLET_LIST || c == NUMERIC_LIST) {
+                        return Self {raw, formated, thinned: rest, kind: LineKind::List};
+                    }
+                    else if first_w.len() == 2 && first_w.chars().all(|c| c == CODE) {
+                        return Self { raw, formated, thinned: rest, kind: LineKind::CodeOpen};
+                    } else if first_w.len() == 1 && first_w.starts_with(FORMULA) {
+                        return Self {raw, formated, thinned: rest, kind: LineKind::FormulaOpen};
+                    } else if first_w.len() == 3 && first_w.starts_with(TABLE) {
+                        return Self {raw, formated, thinned: rest, kind: LineKind::TableOpenOrFormat};
+                    }
                 }
+                
             }
         
         }
@@ -125,8 +150,10 @@ fn split_blocks<'a>(source: &'a str) -> Vec<Block<'a>> {
     let mut par_is_open = false; 
     let lines: Vec<ClassifiedLine> = source.split_inclusive('\n').map(|l| ClassifiedLine::new(l)).collect();
 
+    println!("lines {lines:?}");
     let mut current: usize = 0;
     let mut inner_block: Option<BlockKind> = None;
+
     while current < lines.len() {
         let line = &lines[current];
         match &inner_block {
@@ -173,28 +200,49 @@ fn split_blocks<'a>(source: &'a str) -> Vec<Block<'a>> {
                             inner_block = None;
                         }
                     }, 
-                    LineKind::Image => {
-                        let content: Vec<&str> = line.thinned.split(IMG_SEP).collect();
-                        if content.len() == 2 {
-                            out.push(
-                                Block { 
-                                    kind: BlockKind::Image, 
-                                    lines: vec![content[0], content[1]]
-                                }
-                            );
-                        } else {
-                            let last = content.last().unwrap().trim();
-                            if !last.is_empty() && last.strip_prefix('+').unwrap_or(last).bytes().all(|b| b.is_ascii_digit()) {
-                                out.push(
-                                    Block { 
-                                        kind: BlockKind::Image, 
-                                        lines: vec![content[0], content[1], content[2]]
-                                    }
-                                );  
-                            }
-                        }
-                        
+                    LineKind::Image(scale) => {
+                        out.push(
+                            Block { kind: BlockKind::Image(scale), lines: vec![line.thinned]}
+                        );
                         par_is_open = false;
+                    },
+                    LineKind::List => {
+                        flush(&mut out, line.formated,BlockKind::List);
+                        inner_block = Some(BlockKind::List);
+                        par_is_open = false;
+                    }, 
+                    LineKind::TableOpenOrFormat => {
+                        let mut t_pos = current + 1;
+                        let mut table_counter: u8 = 1;
+                        loop {
+                            if t_pos > lines.len() {
+                                if par_is_open {
+                                    merge_flush(&mut out, line.formated);
+                                }
+                                else {
+                                    flush(&mut out, line.formated, BlockKind::Paragraph);
+                                    par_is_open = true;
+                                }
+                                break;
+                            }
+                            let t_line = &lines[t_pos];
+                            if t_line.kind == LineKind::TableCloseOrFormat || t_line.kind == LineKind::TableOpenOrFormat {
+                                if t_pos == current + 1 {
+                                    if par_is_open {
+                                        merge_flush(&mut out, line.formated);
+                                    }
+                                    else {
+                                        flush(&mut out, line.formated, BlockKind::Paragraph);
+                                        par_is_open = true;
+                                    }
+                                    break;
+                                } else {
+                                    table_counter += 1;
+                                }
+
+                            }
+                            t_pos += 1;
+                        }
                     }
                     _ => {}
                 }
@@ -213,11 +261,20 @@ fn split_blocks<'a>(source: &'a str) -> Vec<Block<'a>> {
                             LineKind::Comment => inner_block = None,
                             _ => merge_flush(&mut out, line.formated),
                         }
-                    }
+                    },
                     BlockKind::Formula => {
                         match line.kind {
                             LineKind::FormulaClose => inner_block = None,
                             _ => merge_flush(&mut out, line.raw),
+                        }
+                    },
+                    BlockKind::List => {
+                        match line.kind {
+                            LineKind::List => merge_flush(&mut out, line.formated),
+                            _ => {
+                                inner_block = None;
+                                current -= 1;
+                            }
                         }
                     }
                     _ => {}
@@ -231,7 +288,9 @@ fn split_blocks<'a>(source: &'a str) -> Vec<Block<'a>> {
 
 
 #[cfg(test)] mod test {
-    use crate::parse::{block_fragmentation::split_blocks, lexemas::{Block, BlockKind::{self, Header}}};
+    use std::vec;
+
+use crate::parse::{block_fragmentation::split_blocks, lexemas::{Block, BlockKind::{self, Header}}};
 
     #[test]
     fn empty_line(){
@@ -1165,7 +1224,76 @@ fn split_blocks<'a>(source: &'a str) -> Vec<Block<'a>> {
         ];
         assert_eq!(out, expected);
     }
+
+
     #[test]
     fn check_image(){
         let source = "\\(path, name, 100)";
-}}
+        let out = split_blocks(source);
+        let expected = vec![
+            Block {
+                kind: BlockKind::Image(100),
+                lines: vec!["path, name"]
+            }
+        ];
+        assert_eq!(out, expected);
+    }
+
+    #[test]
+    fn check_list() {
+        let source = "\\1 aa\n\\ 1 bb\n\\ . cc\n";
+        let out = split_blocks(source);
+        let expected = vec![
+            Block {
+                kind: BlockKind::List,
+                lines: vec!["\\1 aa", "\\ 1 bb", "\\ . cc"]
+            }
+        ];
+        assert_eq!(out, expected);
+    }
+    
+    #[test]
+    fn check_list_something_after() {
+        let source = "\\1 aa\n\\1 bb\n\\+ cc";
+        let out = split_blocks(source);
+        let expected = vec![
+            Block {
+                kind: BlockKind::List,
+                lines: vec!["\\1 aa", "\\1 bb"]
+            },
+            Block {
+                kind: BlockKind::Header(1),
+                lines: vec!["cc"]
+            }
+        ];
+        assert_eq!(out, expected);
+    }
+
+    #[test]
+    fn check_list_split_par() {
+        let source = "aa\n\\. bb\ncc";
+        let out = split_blocks(source);
+        let expected = vec![
+            Block {
+                kind: BlockKind::Paragraph,
+                lines: vec!["aa"]
+            },
+            Block {
+                kind: BlockKind::List,
+                lines: vec!["\\. bb"]
+            },
+            Block {
+                kind: BlockKind::Paragraph,
+                lines: vec!["cc"]
+            }
+        ];
+        assert_eq!(out, expected);
+    }
+
+    #[test]
+    fn check_table() {
+        let source = "\\№ tt\n/aa/bb/\n\\№ Л / Л\n/cc/dd/\n\\№";
+        let out = split_blocks(source);
+        
+    }
+}
