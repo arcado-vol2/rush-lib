@@ -49,7 +49,6 @@ impl Tag {
     pub(crate) const fn new(ch: char, count: usize) -> Self {
          Self { ch, count }
     }
-
     pub(crate) fn strip<'a>(&self, s: &'a str) -> Option<&'a str> {
         let mut rest = s;
         for _ in 0..self.count {
@@ -57,7 +56,6 @@ impl Tag {
         }
         Some(rest)
     }
-
     pub(crate) fn is(&self, s: &str) -> bool {
         self.strip(s) == Some("")
     }
@@ -70,21 +68,35 @@ pub(crate)const TABLE_TAG: Tag = Tag::new(TABLE, 1);
 pub(crate)const NOTE_TAG: Tag = Tag::new(NOTE, 2);
 pub(crate)const BULLET_LIST_TAG: Tag = Tag::new(BULLET_LIST, 1);
 pub(crate)const NUMERIC_LIST_TAG: Tag = Tag::new(NUMERIC_LIST, 1);
+pub(crate)const ANON_NAME_TAG: Tag = Tag::new(ANON, 1);
 
 pub(crate) const NEW_LINE_BREAK: usize = 2;
 
 #[derive(PartialEq, Debug)]
-pub(crate) enum BlockKind {
+pub(crate) struct ImageKind<'a> {
+    pub(crate) label: Option<&'a str>,
+    pub(crate) scale: u16
+}
+
+
+#[derive(PartialEq, Debug)]
+pub(crate) enum BlockKind<'a> {
     Paragraph,
     List,
-    Table,
+    Table(Option<&'a str>),
     Header(u8),
-    Mark,
     Comment,
-    Formula,
-    Code,
-    Image(u16),
+    Formula(Option<&'a str>),
+    Code(Option<&'a str>),
+    Image(ImageKind<'a>),
     Note(u16)
+}
+
+pub(crate) enum RefKind {
+    Formula,
+    Table,
+    Code,
+    Image
 }
 
 
@@ -142,7 +154,7 @@ pub(crate) struct Lexema<'a> {
 
 #[derive(Debug, PartialEq)]
 pub(crate) struct Block<'a> {
-    pub(crate) kind: BlockKind,
+    pub(crate) kind: BlockKind<'a>,
     pub(crate) lines: Vec<&'a str>,
 }
 

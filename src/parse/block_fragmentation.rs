@@ -1,6 +1,6 @@
 use std::vec;
 
-use crate::parse::{block_fragmentation::LineKind::TableLine, lexemas::*};
+use crate::parse::lexemas::*;
 
 
 
@@ -11,11 +11,18 @@ fn merge_flush<'a>(out: &mut Vec<Block<'a>>, line: &'a str) {
     }
 }
 
-fn flush<'a>(out: &mut Vec<Block<'a>>, line: &'a str, kind: BlockKind, par_is_open: &mut bool){
+fn flush<'a>(out: &mut Vec<Block<'a>>, line: Option<&'a str>, kind: BlockKind<'a>, par_is_open: &mut bool){
     *par_is_open = false;
-    out.push(
-        Block { kind, lines: vec![line]}
-    );
+    if let Some(line) = line {
+        out.push(
+            Block { kind, lines: vec![line]}
+        );
+    } else {
+        out.push(
+            Block { kind, lines: Vec::new()}
+        );
+    }
+    
 }
 
 #[derive(PartialEq, Debug)]
@@ -35,6 +42,14 @@ enum LineKind {
     Image(u16),
     Header(u8),
     Note(u16),
+}
+
+enum OpenBlockKind {
+    None,
+    Code,
+    Formula,
+    Comment,
+    Table
 }
 
 #[derive(Debug)]
@@ -87,10 +102,10 @@ impl<'a> ClassifiedLine<'a> {
                         if let Ok(scale) = last.trim().parse::<u16>() && scale > 0{
                             return  Self {raw, formated, thinned: head, kind: LineKind::Image(scale)};
                         } else {
-                            return Self {raw, formated, thinned: head, kind: LineKind::Image(0)} ;
+                            return Self {raw, formated, thinned: head, kind: LineKind::Image(100)} ;
                         }
                     }
-                    return Self {raw, formated, thinned, kind: LineKind::Image(0)} ;
+                    return Self {raw, formated, thinned, kind: LineKind::Image(100)} ;
                 }
             } else if !first_w.is_empty() {
                 if rest.is_empty() {
@@ -165,6 +180,13 @@ fn search_for_pair(lines: &Vec<ClassifiedLine>, current: &usize, open_kind_opt: 
     }
 }
 
+fn resolve_name<'a>(name_line: &'a str) -> Option<&'a str> {
+    if ANON_NAME_TAG.is(name_line) {
+        return None;
+    }
+    return Some(name_line);
+}
+
 fn split_blocks<'a>(source: &'a str) -> Vec<Block<'a>> {
     let source = source.strip_prefix('\u{FEFF}').unwrap_or(source);
     let mut out: Vec<Block<'a>> = Vec::new();
@@ -172,7 +194,7 @@ fn split_blocks<'a>(source: &'a str) -> Vec<Block<'a>> {
     let lines: Vec<ClassifiedLine> = source.split_inclusive('\n').map(|l| ClassifiedLine::new(l)).collect();
 
     let mut current: usize = 0;
-    let mut inner_block: Option<BlockKind> = None;
+    let mut inner_block = OpenBlockKind::None;
 
     fn flush_par<'a>(out: &mut Vec<Block<'a>>, line: &'a str, par_is_open: &mut bool) {
          if *par_is_open {
@@ -185,57 +207,52 @@ fn split_blocks<'a>(source: &'a str) -> Vec<Block<'a>> {
             *par_is_open = true;
         }
     }
-
-    println!("Input");
-    for line in &lines {
-        println!("{line:?}");
-    }
-    println!("----");
     while current < lines.len() {
         let line = &lines[current];
         match &inner_block {
-            None => {
+            OpenBlockKind::None => {
                 match line.kind {
                     LineKind::Empty => par_is_open = false,
                     LineKind::Regular | LineKind::TableFormat | LineKind::TableLine | LineKind::TableClose => {
                        flush_par(&mut out, line.formated, &mut par_is_open);
                     },
                     LineKind::Header(l) => {
-                        flush(&mut out, line.thinned, BlockKind::Header(l), &mut par_is_open);
+                        flush(&mut out, Some(line.thinned), BlockKind::Header(l), &mut par_is_open);
                     },
                     LineKind::CodeOpen => {
                         if search_for_pair(&lines, &current, Some(LineKind::CodeOpen), LineKind::CodeClose) {
-                            flush(&mut out, line.thinned, BlockKind::Code, &mut par_is_open);
-                            inner_block = Some(BlockKind::Code);
+                            flush(&mut out, None, BlockKind::Code(resolve_name(line.thinned)), &mut par_is_open);
+                            inner_block = OpenBlockKind::Code;
                         } else {
-                            inner_block = None;
+                            inner_block = OpenBlockKind::None;
                         }
                     },
                     LineKind::Comment => {
                         if search_for_pair(&lines, &current, None, LineKind::Comment) {
                             out.push(Block { kind: BlockKind::Comment, lines: Vec::new() });
-                            inner_block = Some(BlockKind::Comment);
+                            inner_block = OpenBlockKind::Comment;
                             par_is_open = false;
                         } else {
-                            inner_block = None;
+                            inner_block = OpenBlockKind::None;
                         }
                     },
                     LineKind::FormulaOpen => {
                         if search_for_pair(&lines, &current, Some(LineKind::FormulaOpen), LineKind::FormulaClose) {
-                            flush(&mut out, line.thinned, BlockKind::Formula, &mut par_is_open);
-                            inner_block = Some(BlockKind::Formula);
+                            flush(&mut out, None, BlockKind::Formula(resolve_name(line.thinned)), &mut par_is_open);
+                            inner_block = OpenBlockKind::Formula;
                         } else {
-                            inner_block = None;
+                            inner_block = OpenBlockKind::None;
                         }
                     }, 
                     LineKind::Image(scale) => {
-                        out.push(
-                            Block { kind: BlockKind::Image(scale), lines: vec![line.thinned]}
-                        );
+                        let mut parts = line.thinned.split(IMG_SEP);
+                        let path = parts.next().unwrap().trim_matches(|c| is_blank(c));
+                        let name = parts.next().unwrap().trim_matches(|c| is_blank(c));
+                        flush(&mut out, Some(path), BlockKind::Image(ImageKind {scale, label: resolve_name(name)}), &mut par_is_open);
                         par_is_open = false;
                     },
                     LineKind::List => {
-                        flush(&mut out, line.formated,BlockKind::List, &mut par_is_open);
+                        flush(&mut out, Some(line.formated),BlockKind::List, &mut par_is_open);
                         for t_pos in current+1..lines.len(){
                             let t_line = &lines[t_pos];
                             match t_line.kind {
@@ -254,9 +271,9 @@ fn split_blocks<'a>(source: &'a str) -> Vec<Block<'a>> {
                         let mut t_pos = current + 1;
                         let mut found_format = false;
                         loop {
-                            if t_pos >= lines.len() { 
+                            if t_pos >= lines.len() {
                                 flush_par(&mut out, line.formated, &mut par_is_open);
-                                inner_block = None;
+                                inner_block = OpenBlockKind::None;
                                 break;
                             }
                             let t_line = &lines[t_pos];
@@ -264,12 +281,12 @@ fn split_blocks<'a>(source: &'a str) -> Vec<Block<'a>> {
                                 LineKind::TableFormat => {
                                     if found_format {
                                         flush_par(&mut out, line.formated, &mut par_is_open);
-                                        inner_block = None;
+                                        inner_block = OpenBlockKind::None;
                                         break;
                                     }
-                                    if t_pos == current + 1 { 
+                                    if t_pos == current + 1 {
                                         flush_par(&mut out, line.formated, &mut par_is_open);
-                                        inner_block = None;
+                                        inner_block = OpenBlockKind::None;
                                         break;
                                     } else {
                                         found_format = true; 
@@ -278,18 +295,19 @@ fn split_blocks<'a>(source: &'a str) -> Vec<Block<'a>> {
                                 LineKind::TableClose => {
                                     if !found_format {
                                         flush_par(&mut out, line.formated, &mut par_is_open);
-                                        inner_block = None;
+                                        inner_block = OpenBlockKind::None;
                                         break;
                                     } else {
-                                        flush(&mut out, line.formated, BlockKind::Table, &mut par_is_open);
-                                        inner_block = Some(BlockKind::Table);
+                                        flush(&mut out, None, BlockKind::Table(resolve_name(line.thinned)), &mut par_is_open);
+                                        inner_block = OpenBlockKind::Table;
                                         break;
                                     }
                                 },
-                                LineKind::TableLine => { },
-                                _ => { 
+                                LineKind::TableLine => {
+                                },
+                                _ => {
                                     flush_par(&mut out, line.formated, &mut par_is_open);
-                                    inner_block = None;
+                                    inner_block = OpenBlockKind::None;
                                     break;
                                 }
                             }
@@ -297,48 +315,43 @@ fn split_blocks<'a>(source: &'a str) -> Vec<Block<'a>> {
                         }
                     },
                     LineKind::Note(n) => {
-                        flush(&mut out, line.thinned, BlockKind::Note(n), &mut par_is_open);
+                        flush(&mut out, Some(line.thinned), BlockKind::Note(n), &mut par_is_open);
                     }
                     _ => {}
                 }
             }
-            Some(inner_block_kind) => {
-                match inner_block_kind {
-                    BlockKind::Code => {
+            OpenBlockKind::Code => {
                         match line.kind {
-                            LineKind::CodeClose => inner_block = None,
+                            LineKind::CodeClose => inner_block = OpenBlockKind::None,
                             _ => merge_flush(&mut out, line.raw)
                         }
                         
                     },
-                    BlockKind::Comment => {
+                    OpenBlockKind::Comment => {
                         match line.kind {
-                            LineKind::Comment => inner_block = None,
+                            LineKind::Comment => inner_block = OpenBlockKind::None,
                             _ => merge_flush(&mut out, line.formated),
                         }
                     },
-                    BlockKind::Formula => {
+                    OpenBlockKind::Formula => {
                         match line.kind {
-                            LineKind::FormulaClose => inner_block = None,
+                            LineKind::FormulaClose => inner_block = OpenBlockKind::None,
                             _ => merge_flush(&mut out, line.raw),
                         }
                     },
-                    BlockKind::Table => {
+                    OpenBlockKind::Table => {
                         match line.kind {
                             LineKind::TableClose => {
-                                inner_block = None
+                                inner_block = OpenBlockKind::None
                             },
-                            LineKind::TableFormat | LineKind::TableLine => { 
+                            LineKind::TableFormat | LineKind::TableLine => {
                                 merge_flush(&mut out, line.formated);
                             },
-                            _ => ()
-                            
-                        }
+                            _ => () 
                     }
-                    _ => {}
                 }
             }
-        }
+        
         current+=1;
     }   
     out
@@ -348,7 +361,7 @@ fn split_blocks<'a>(source: &'a str) -> Vec<Block<'a>> {
 #[cfg(test)] mod test {
     use std::vec;
 
-use crate::parse::{block_fragmentation::split_blocks, lexemas::{Block, BlockKind::{self, Header}}};
+use crate::parse::{block_fragmentation::split_blocks, lexemas::{Block, BlockKind::{self, Header}, ImageKind}};
 
     #[test]
     fn block_check_empty_source(){
@@ -705,8 +718,8 @@ use crate::parse::{block_fragmentation::split_blocks, lexemas::{Block, BlockKind
         let out = split_blocks(source);
         let expected = vec![
             Block {
-                kind: BlockKind::Code,
-                lines: vec!["aa", "bb"]
+                kind: BlockKind::Code(Some("aa")),
+                lines: vec!["bb"]
             }
         ];
         assert_eq!(out, expected);
@@ -718,8 +731,8 @@ use crate::parse::{block_fragmentation::split_blocks, lexemas::{Block, BlockKind
         let out = split_blocks(source);
         let expected = vec![
             Block {
-                kind: BlockKind::Code,
-                lines: vec!["0", "aa"]
+                kind: BlockKind::Code(None),
+                lines: vec!["aa"]
             }
         ];
         assert_eq!(out, expected);
@@ -731,8 +744,8 @@ use crate::parse::{block_fragmentation::split_blocks, lexemas::{Block, BlockKind
         let out = split_blocks(source);
         let expected = vec![
             Block {
-                kind: BlockKind::Code,
-                lines: vec!["aa", "\t   bb", "   cc", "", "\tdd"]
+                kind: BlockKind::Code(Some("aa")),
+                lines: vec!["\t   bb", "   cc", "", "\tdd"]
             }
         ];
         assert_eq!(out, expected);
@@ -744,8 +757,8 @@ use crate::parse::{block_fragmentation::split_blocks, lexemas::{Block, BlockKind
         let out = split_blocks(source);
         let expected = vec![
             Block {
-                kind: BlockKind::Code,
-                lines: vec!["aa", "bb"]
+                kind: BlockKind::Code(Some("aa")),
+                lines: vec!["bb"]
             }
         ];
         assert_eq!(out, expected);
@@ -757,8 +770,8 @@ use crate::parse::{block_fragmentation::split_blocks, lexemas::{Block, BlockKind
         let out = split_blocks(source);
         let expected = vec![
             Block {
-                kind: BlockKind::Code,
-                lines: vec!["aa", "bb"]
+                kind: BlockKind::Code(Some("aa")),
+                lines: vec!["bb"]
             }
         ];
         assert_eq!(out, expected);
@@ -796,8 +809,8 @@ use crate::parse::{block_fragmentation::split_blocks, lexemas::{Block, BlockKind
         let out = split_blocks(source);
         let expected = vec![
             Block {
-                kind: BlockKind::Code,
-                lines: vec!["aa", "  ", "bb", "cc"]
+                kind: BlockKind::Code(Some("aa")),
+                lines: vec!["  ", "bb", "cc"]
             }
         ];
         assert_eq!(out, expected);
@@ -814,8 +827,8 @@ use crate::parse::{block_fragmentation::split_blocks, lexemas::{Block, BlockKind
                 lines: vec![ "bb", "cc"]
             },
             Block {
-                kind: BlockKind::Code,
-                lines: vec!["dd", "ee"]
+                kind: BlockKind::Code(Some("dd")),
+                lines: vec!["ee"]
             }
         ];
         assert_eq!(out, expected);
@@ -831,8 +844,8 @@ use crate::parse::{block_fragmentation::split_blocks, lexemas::{Block, BlockKind
                 lines: vec![ "aa"]
             },
             Block {
-                kind: BlockKind::Code,
-                lines: vec!["bb", "cc"]
+                kind: BlockKind::Code(Some("bb")),
+                lines: vec!["cc"]
             },
             Block {
                 kind: BlockKind::Paragraph,
@@ -1050,8 +1063,8 @@ use crate::parse::{block_fragmentation::split_blocks, lexemas::{Block, BlockKind
         let out = split_blocks(source);
         let expected = vec![
             Block {
-                kind: BlockKind::Formula,
-                lines: vec!["aa", "bb"]
+                kind: BlockKind::Formula(Some("aa")),
+                lines: vec!["bb"]
             }
         ];
         assert_eq!(out, expected);
@@ -1063,8 +1076,8 @@ use crate::parse::{block_fragmentation::split_blocks, lexemas::{Block, BlockKind
         let out = split_blocks(source);
         let expected = vec![
             Block {
-                kind: BlockKind::Formula,
-                lines: vec!["0", "aa"]
+                kind: BlockKind::Formula(None),
+                lines: vec!["aa"]
             }
         ];
         assert_eq!(out, expected);
@@ -1076,8 +1089,8 @@ use crate::parse::{block_fragmentation::split_blocks, lexemas::{Block, BlockKind
         let out = split_blocks(source);
         let expected = vec![
             Block {
-                kind: BlockKind::Formula,
-                lines: vec!["aa", "bb"]
+                kind: BlockKind::Formula(Some("aa")),
+                lines: vec!["bb"]
             }
         ];
         assert_eq!(out, expected);
@@ -1102,8 +1115,8 @@ use crate::parse::{block_fragmentation::split_blocks, lexemas::{Block, BlockKind
         let out = split_blocks(source);
         let expected = vec![
             Block {
-                kind: BlockKind::Formula,
-                lines: vec!["aa", "bb"]
+                kind: BlockKind::Formula(Some("aa")),
+                lines: vec!["bb"]
             }
         ];
         assert_eq!(out, expected);
@@ -1115,8 +1128,8 @@ use crate::parse::{block_fragmentation::split_blocks, lexemas::{Block, BlockKind
         let out = split_blocks(source);
         let expected = vec![
             Block {
-                kind: BlockKind::Formula,
-                lines: vec!["aa", "  \\frac{a}{b}\t", "\t= c"]
+                kind: BlockKind::Formula(Some("aa")),
+                lines: vec!["  \\frac{a}{b}\t", "\t= c"]
             }
         ];
         assert_eq!(out, expected);
@@ -1128,8 +1141,8 @@ use crate::parse::{block_fragmentation::split_blocks, lexemas::{Block, BlockKind
         let out = split_blocks(source);
         let expected = vec![
             Block {
-                kind: BlockKind::Formula,
-                lines: vec!["aa", "bb"]
+                kind: BlockKind::Formula(Some("aa")),
+                lines: vec!["bb"]
             }
         ];
         assert_eq!(out, expected);
@@ -1141,8 +1154,8 @@ use crate::parse::{block_fragmentation::split_blocks, lexemas::{Block, BlockKind
         let out = split_blocks(source);
         let expected = vec![
             Block {
-                kind: BlockKind::Formula,
-                lines: vec!["aa", "bb"]
+                kind: BlockKind::Formula(Some("aa")),
+                lines: vec!["bb"]
             }
         ];
         assert_eq!(out, expected);
@@ -1210,8 +1223,8 @@ use crate::parse::{block_fragmentation::split_blocks, lexemas::{Block, BlockKind
         let out = split_blocks(source);
         let expected = vec![
             Block {
-                kind: BlockKind::Formula,
-                lines: vec!["aa", "  ", "bb", "", "cc"]
+                kind: BlockKind::Formula(Some("aa")),
+                lines: vec!["  ", "bb", "", "cc"]
             }
         ];
         assert_eq!(out, expected);
@@ -1227,8 +1240,8 @@ use crate::parse::{block_fragmentation::split_blocks, lexemas::{Block, BlockKind
                 lines: vec!["bb", "cc"]
             },
             Block {
-                kind: BlockKind::Formula,
-                lines: vec!["dd", "ee"]
+                kind: BlockKind::Formula(Some("dd")),
+                lines: vec!["ee"]
             }
         ];
         assert_eq!(out, expected);
@@ -1244,8 +1257,8 @@ use crate::parse::{block_fragmentation::split_blocks, lexemas::{Block, BlockKind
                 lines: vec!["aa"]
             },
             Block {
-                kind: BlockKind::Formula,
-                lines: vec!["bb", "cc"]
+                kind: BlockKind::Formula(Some("bb")),
+                lines: vec!["cc"]
             },
             Block {
                 kind: BlockKind::Paragraph,
@@ -1261,8 +1274,8 @@ use crate::parse::{block_fragmentation::split_blocks, lexemas::{Block, BlockKind
         let out = split_blocks(source);
         let expected = vec![
             Block {
-                kind: BlockKind::Formula,
-                lines: vec!["aa", "\\+ bb", "\\\"", "\\// cc", "\\//"]
+                kind: BlockKind::Formula(Some("aa")),
+                lines: vec!["\\+ bb", "\\\"", "\\// cc", "\\//"]
             }
         ];
         assert_eq!(out, expected);
@@ -1274,8 +1287,8 @@ use crate::parse::{block_fragmentation::split_blocks, lexemas::{Block, BlockKind
         let out = split_blocks(source);
         let expected = vec![
             Block {
-                kind: BlockKind::Formula,
-                lines: vec!["aa", "bb"]
+                kind: BlockKind::Formula(Some("aa")),
+                lines: vec!["bb"]
             },
             Block {
                 kind: BlockKind::Comment,
@@ -1288,12 +1301,12 @@ use crate::parse::{block_fragmentation::split_blocks, lexemas::{Block, BlockKind
 
     #[test]
     fn block_check_image_basic(){
-        let source = "\\(aa, bb, 100)";
+        let source = "\\(aa, bb, 110)";
         let out = split_blocks(source);
         let expected = vec![
             Block {
-                kind: BlockKind::Image(100),
-                lines: vec!["aa, bb"]
+                kind: BlockKind::Image(ImageKind {label: Some("bb"), scale: 110}),
+                lines: vec!["aa"]
             }
         ];
         assert_eq!(out, expected);
@@ -1304,7 +1317,7 @@ use crate::parse::{block_fragmentation::split_blocks, lexemas::{Block, BlockKind
         let source = "\\(aa, bb, cc)";
         let out = split_blocks(source);
         let expected: Vec<Block> = vec![
-            Block { kind: BlockKind::Image(0), lines: vec!["aa, bb"] }
+            Block { kind: BlockKind::Image(ImageKind {label: Some("bb"), scale: 100}), lines: vec!["aa"] }
         ];
         assert_eq!(out, expected);
     }
@@ -1366,8 +1379,8 @@ use crate::parse::{block_fragmentation::split_blocks, lexemas::{Block, BlockKind
         let out = split_blocks(source);
         let expected = vec![
             Block {
-                kind: BlockKind::Table,
-                lines: vec!["\\№ tt", "/aa/bb/", "\\№- Л / Л", "/cc/dd/"]
+                kind: BlockKind::Table(Some("tt")),
+                lines: vec!["/aa/bb/", "\\№- Л / Л", "/cc/dd/"]
             }
         ];
         assert_eq!(out, expected);
@@ -1385,7 +1398,6 @@ use crate::parse::{block_fragmentation::split_blocks, lexemas::{Block, BlockKind
         ];
         assert_eq!(out, expected);
     }
-
     // ===== General =====
 
     #[test]
@@ -1468,7 +1480,6 @@ use crate::parse::{block_fragmentation::split_blocks, lexemas::{Block, BlockKind
         ];
         assert_eq!(out, expected);
     }
-
     // ===== Space between \ and tag =====
 
     #[test]
@@ -1568,8 +1579,8 @@ use crate::parse::{block_fragmentation::split_blocks, lexemas::{Block, BlockKind
         let out = split_blocks(source);
         let expected = vec![
             Block {
-                kind: BlockKind::Code,
-                lines: vec!["aa", "bb", "\\ //"]
+                kind: BlockKind::Code(Some("aa")),
+                lines: vec!["bb", "\\ //"]
             }
         ];
         assert_eq!(out, expected);
@@ -1581,8 +1592,8 @@ use crate::parse::{block_fragmentation::split_blocks, lexemas::{Block, BlockKind
         let out = split_blocks(source);
         let expected = vec![
             Block {
-                kind: BlockKind::Formula,
-                lines: vec!["aa", "bb", "\\ $"]
+                kind: BlockKind::Formula(Some("aa")),
+                lines: vec!["bb", "\\ $"]
             }
         ];
         assert_eq!(out, expected);
@@ -1600,7 +1611,6 @@ use crate::parse::{block_fragmentation::split_blocks, lexemas::{Block, BlockKind
         ];
         assert_eq!(out, expected);
     }
-
     // ===== Paragraph =====
 
     #[test]
@@ -1623,7 +1633,6 @@ use crate::parse::{block_fragmentation::split_blocks, lexemas::{Block, BlockKind
         ];
         assert_eq!(out, expected);
     }
-
     // ===== Header =====
 
     #[test]
@@ -1699,7 +1708,6 @@ use crate::parse::{block_fragmentation::split_blocks, lexemas::{Block, BlockKind
         ];
         assert_eq!(out, expected);
     }
-
     // ===== List =====
 
     #[test]
@@ -1781,7 +1789,7 @@ use crate::parse::{block_fragmentation::split_blocks, lexemas::{Block, BlockKind
                 lines: vec!["\\. aa"]
             },
             Block {
-                kind: BlockKind::Image(0),
+                kind: BlockKind::Image(ImageKind { label: Some("n"), scale: 100 }),
                 lines: vec!["bb, cc"]
             },
             Block {
@@ -1802,8 +1810,8 @@ use crate::parse::{block_fragmentation::split_blocks, lexemas::{Block, BlockKind
                 lines: vec!["\\. aa"]
             },
             Block {
-                kind: BlockKind::Code,
-                lines: vec!["bb", "cc"]
+                kind: BlockKind::Code(Some("bb")),
+                lines: vec!["cc"]
             },
             Block {
                 kind: BlockKind::List,
@@ -1823,8 +1831,8 @@ use crate::parse::{block_fragmentation::split_blocks, lexemas::{Block, BlockKind
                 lines: vec!["\\. aa"]
             },
             Block {
-                kind: BlockKind::Table,
-                lines: vec!["\\№ tt", "/bb/", "\\№-", "/cc/"]
+                kind: BlockKind::Table(Some("tt")),
+                lines: vec!["/bb/", "\\№-", "/cc/"]
             },
             Block {
                 kind: BlockKind::List,
@@ -1833,7 +1841,6 @@ use crate::parse::{block_fragmentation::split_blocks, lexemas::{Block, BlockKind
         ];
         assert_eq!(out, expected);
     }
-
     // ===== Image =====
 
     #[test]
@@ -1842,8 +1849,8 @@ use crate::parse::{block_fragmentation::split_blocks, lexemas::{Block, BlockKind
         let out = split_blocks(source);
         let expected = vec![
             Block {
-                kind: BlockKind::Image(0),
-                lines: vec!["aa, bb"]
+                kind: BlockKind::Image(ImageKind { label: Some("bb"), scale: 100  }),
+                lines: vec!["aa"]
             }
         ];
         assert_eq!(out, expected);
@@ -1855,8 +1862,8 @@ use crate::parse::{block_fragmentation::split_blocks, lexemas::{Block, BlockKind
         let out = split_blocks(source);
         let expected = vec![
             Block {
-                kind: BlockKind::Image(0),
-                lines: vec!["aa, 0"]
+                kind: BlockKind::Image(ImageKind { label: None, scale: 100  }),
+                lines: vec!["aa"]
             }
         ];
         assert_eq!(out, expected);
@@ -1868,8 +1875,8 @@ use crate::parse::{block_fragmentation::split_blocks, lexemas::{Block, BlockKind
         let out = split_blocks(source);
         let expected = vec![
             Block {
-                kind: BlockKind::Image(1),
-                lines: vec!["aa, bb"]
+                kind: BlockKind::Image(ImageKind { label: Some("bb"), scale: 1}),
+                lines: vec!["aa"]
             }
         ];
         assert_eq!(out, expected);
@@ -1878,8 +1885,8 @@ use crate::parse::{block_fragmentation::split_blocks, lexemas::{Block, BlockKind
         let out = split_blocks(source);
         let expected = vec![
             Block {
-                kind: BlockKind::Image(65535),
-                lines: vec!["aa, bb"]
+                kind: BlockKind::Image(ImageKind { label: Some("bb"), scale: 65535  }),
+                lines: vec!["aa"]
             }
         ];
         assert_eq!(out, expected);
@@ -1891,8 +1898,8 @@ use crate::parse::{block_fragmentation::split_blocks, lexemas::{Block, BlockKind
         let out = split_blocks(source);
         let expected = vec![
             Block {
-                kind: BlockKind::Image(0),
-                lines: vec!["aa, bb"]
+                kind: BlockKind::Image(ImageKind { label: Some("bb"), scale: 100 }),
+                lines: vec!["aa"]
             }
         ];
         assert_eq!(out, expected);
@@ -1901,8 +1908,8 @@ use crate::parse::{block_fragmentation::split_blocks, lexemas::{Block, BlockKind
         let out = split_blocks(source);
         let expected = vec![
             Block {
-                kind: BlockKind::Image(0),
-                lines: vec!["aa, bb"]
+                kind: BlockKind::Image(ImageKind { label: Some("bb"), scale: 100 }),
+                lines: vec!["aa"]
             }
         ];
         assert_eq!(out, expected);
@@ -1911,8 +1918,8 @@ use crate::parse::{block_fragmentation::split_blocks, lexemas::{Block, BlockKind
         let out = split_blocks(source);
         let expected = vec![
             Block {
-                kind: BlockKind::Image(0),
-                lines: vec!["aa, bb"]
+                kind: BlockKind::Image(ImageKind { label: Some("bb"), scale: 100  }),
+                lines: vec!["aa"]
             }
         ];
         assert_eq!(out, expected);
@@ -1921,8 +1928,8 @@ use crate::parse::{block_fragmentation::split_blocks, lexemas::{Block, BlockKind
         let out = split_blocks(source);
         let expected = vec![
             Block {
-                kind: BlockKind::Image(0),
-                lines: vec!["aa, bb"]
+                kind: BlockKind::Image(ImageKind { label: Some("bb"), scale: 100  }),
+                lines: vec!["aa"]
             }
         ];
         assert_eq!(out, expected);
@@ -1986,8 +1993,8 @@ use crate::parse::{block_fragmentation::split_blocks, lexemas::{Block, BlockKind
         let out = split_blocks(source);
         let expected = vec![
             Block {
-                kind: BlockKind::Image(100),
-                lines: vec!["aa, bb"]
+                kind: BlockKind::Image(ImageKind { label: Some("bb"), scale: 100  }),
+                lines: vec!["aa"]
             }
         ];
         assert_eq!(out, expected);
@@ -2003,8 +2010,8 @@ use crate::parse::{block_fragmentation::split_blocks, lexemas::{Block, BlockKind
                 lines: vec!["aa"]
             },
             Block {
-                kind: BlockKind::Image(0),
-                lines: vec!["bb, cc"]
+                kind: BlockKind::Image(ImageKind { label: Some("cc"), scale: 100  }),
+                lines: vec!["bb"]
             },
             Block {
                 kind: BlockKind::Paragraph,
@@ -2020,17 +2027,16 @@ use crate::parse::{block_fragmentation::split_blocks, lexemas::{Block, BlockKind
         let out = split_blocks(source);
         let expected = vec![
             Block {
-                kind: BlockKind::Image(0),
-                lines: vec!["aa, bb"]
+                kind: BlockKind::Image(ImageKind { label: Some("bb"), scale: 100  }),
+                lines: vec!["aa"]
             },
             Block {
-                kind: BlockKind::Image(50),
-                lines: vec!["cc, dd"]
+                kind: BlockKind::Image(ImageKind { label: Some("dd"), scale: 50  }),
+                lines: vec!["cc"]
             }
         ];
         assert_eq!(out, expected);
     }
-
     // ===== Note =====
 
     #[test]
@@ -2109,7 +2115,6 @@ use crate::parse::{block_fragmentation::split_blocks, lexemas::{Block, BlockKind
         ];
         assert_eq!(out, expected);
     }
-
     // ===== Comment =====
 
     #[test]
@@ -2169,8 +2174,8 @@ use crate::parse::{block_fragmentation::split_blocks, lexemas::{Block, BlockKind
                 lines: vec!["aa"]
             },
             Block {
-                kind: BlockKind::Code,
-                lines: vec!["bb", "cc"]
+                kind: BlockKind::Code(Some("bb")),
+                lines: vec!["cc"]
             }
         ];
         assert_eq!(out, expected);
@@ -2196,7 +2201,6 @@ use crate::parse::{block_fragmentation::split_blocks, lexemas::{Block, BlockKind
         ];
         assert_eq!(out, expected);
     }
-
     // ===== Formula =====
 
     #[test]
@@ -2205,8 +2209,8 @@ use crate::parse::{block_fragmentation::split_blocks, lexemas::{Block, BlockKind
         let out = split_blocks(source);
         let expected = vec![
             Block {
-                kind: BlockKind::Formula,
-                lines: vec!["aa"]
+                kind: BlockKind::Formula(Some("aa")),
+                lines: vec![]
             }
         ];
         assert_eq!(out, expected);
@@ -2218,8 +2222,8 @@ use crate::parse::{block_fragmentation::split_blocks, lexemas::{Block, BlockKind
         let out = split_blocks(source);
         let expected = vec![
             Block {
-                kind: BlockKind::Formula,
-                lines: vec!["aa bb", "cc"]
+                kind: BlockKind::Formula(Some("aa bb")),
+                lines: vec!["cc"]
             }
         ];
         assert_eq!(out, expected);
@@ -2231,8 +2235,8 @@ use crate::parse::{block_fragmentation::split_blocks, lexemas::{Block, BlockKind
         let out = split_blocks(source);
         let expected = vec![
             Block {
-                kind: BlockKind::Formula,
-                lines: vec!["aa", "\\// bb"]
+                kind: BlockKind::Formula(Some("aa")),
+                lines: vec!["\\// bb"]
             }
         ];
         assert_eq!(out, expected);
@@ -2263,7 +2267,6 @@ use crate::parse::{block_fragmentation::split_blocks, lexemas::{Block, BlockKind
         ];
         assert_eq!(out, expected);
     }
-
     // ===== Code =====
 
     #[test]
@@ -2272,8 +2275,8 @@ use crate::parse::{block_fragmentation::split_blocks, lexemas::{Block, BlockKind
         let out = split_blocks(source);
         let expected = vec![
             Block {
-                kind: BlockKind::Code,
-                lines: vec!["aa"]
+                kind: BlockKind::Code(Some("aa")),
+                lines: vec![]
             }
         ];
         assert_eq!(out, expected);
@@ -2285,8 +2288,8 @@ use crate::parse::{block_fragmentation::split_blocks, lexemas::{Block, BlockKind
         let out = split_blocks(source);
         let expected = vec![
             Block {
-                kind: BlockKind::Code,
-                lines: vec!["aa bb", "cc"]
+                kind: BlockKind::Code(Some("aa bb")),
+                lines: vec!["cc"]
             }
         ];
         assert_eq!(out, expected);
@@ -2311,8 +2314,8 @@ use crate::parse::{block_fragmentation::split_blocks, lexemas::{Block, BlockKind
         let out = split_blocks(source);
         let expected = vec![
             Block {
-                kind: BlockKind::Code,
-                lines: vec!["aa", "\\+ bb", "\\\"", "\\$ cc", "\\$", "\\№ dd", "\\. ee", "\\**1 ff", "\\(gg, hh)"]
+                kind: BlockKind::Code(Some("aa")),
+                lines: vec!["\\+ bb", "\\\"", "\\$ cc", "\\$", "\\№ dd", "\\. ee", "\\**1 ff", "\\(gg, hh)"]
             }
         ];
         assert_eq!(out, expected);
@@ -2324,8 +2327,8 @@ use crate::parse::{block_fragmentation::split_blocks, lexemas::{Block, BlockKind
         let out = split_blocks(source);
         let expected = vec![
             Block {
-                kind: BlockKind::Code,
-                lines: vec!["aa", "\\$ bb", "cc"]
+                kind: BlockKind::Code(Some("aa")),
+                lines: vec!["\\$ bb", "cc"]
             }
         ];
         assert_eq!(out, expected);
@@ -2337,13 +2340,12 @@ use crate::parse::{block_fragmentation::split_blocks, lexemas::{Block, BlockKind
         let out = split_blocks(source);
         let expected = vec![
             Block {
-                kind: BlockKind::Code,
-                lines: vec!["aa", "bb", "", "cc"]
+                kind: BlockKind::Code(Some("aa")),
+                lines: vec!["bb", "", "cc"]
             }
         ];
         assert_eq!(out, expected);
     }
-
     // ===== Table =====
 
     #[test]
@@ -2352,7 +2354,7 @@ use crate::parse::{block_fragmentation::split_blocks, lexemas::{Block, BlockKind
         let out = split_blocks(source);
         let expected = vec![
             Block {
-                kind: BlockKind::Table,
+                kind: BlockKind::Table(Some("n")),
                 lines: vec!["\\№ tt", "/aa/bb/", "\\№-", "/cc/dd/"]
             }
         ];
@@ -2365,7 +2367,7 @@ use crate::parse::{block_fragmentation::split_blocks, lexemas::{Block, BlockKind
         let out = split_blocks(source);
         let expected = vec![
             Block {
-                kind: BlockKind::Table,
+                kind: BlockKind::Table(Some("n")),
                 lines: vec!["\\№ tt", "/aa/bb/", "/cc/dd/", "\\№- Л / П", "/ee/ff/"]
             }
         ];
@@ -2378,7 +2380,7 @@ use crate::parse::{block_fragmentation::split_blocks, lexemas::{Block, BlockKind
         let out = split_blocks(source);
         let expected = vec![
             Block {
-                kind: BlockKind::Table,
+                kind: BlockKind::Table(Some("n")),
                 lines: vec!["\\№ tt", "/aa/bb/", "\\№-"]
             }
         ];
@@ -2391,7 +2393,7 @@ use crate::parse::{block_fragmentation::split_blocks, lexemas::{Block, BlockKind
         let out = split_blocks(source);
         let expected = vec![
             Block {
-                kind: BlockKind::Table,
+                kind: BlockKind::Table(Some("n")),
                 lines: vec!["\\№ 0", "/aa/", "\\№-", "/bb/"]
             }
         ];
@@ -2404,7 +2406,7 @@ use crate::parse::{block_fragmentation::split_blocks, lexemas::{Block, BlockKind
         let out = split_blocks(source);
         let expected = vec![
             Block {
-                kind: BlockKind::Table,
+                kind: BlockKind::Table(Some("n")),
                 lines: vec!["\\№ tt", "/aa/bb/", "\\№- Л", "/cc/dd/"]
             }
         ];
@@ -2417,7 +2419,7 @@ use crate::parse::{block_fragmentation::split_blocks, lexemas::{Block, BlockKind
         let out = split_blocks(source);
         let expected = vec![
             Block {
-                kind: BlockKind::Table,
+                kind: BlockKind::Table(Some("n")),
                 lines: vec!["\\№ tt", "/aa/", "\\№-", "/bb/"]
             }
         ];
@@ -2577,7 +2579,7 @@ use crate::parse::{block_fragmentation::split_blocks, lexemas::{Block, BlockKind
                 lines: vec!["\\№ Неполная таблица", "/ Заголовок / Заголовок /"]
             },
             Block {
-                kind: BlockKind::Table,
+                kind: BlockKind::Table(Some("n")),
                 lines: vec!["\\№ Новая таблица", "/ Заголовок / Заголовок /", "\\№-", "/ ячейка / ячейка /"]
             }
         ];
@@ -2594,7 +2596,7 @@ use crate::parse::{block_fragmentation::split_blocks, lexemas::{Block, BlockKind
                 lines: vec!["aa"]
             },
             Block {
-                kind: BlockKind::Table,
+                kind: BlockKind::Table(Some("n")),
                 lines: vec!["\\№ tt", "/bb/", "\\№-", "/cc/"]
             },
             Block {
@@ -2611,11 +2613,11 @@ use crate::parse::{block_fragmentation::split_blocks, lexemas::{Block, BlockKind
         let out = split_blocks(source);
         let expected = vec![
             Block {
-                kind: BlockKind::Table,
+                kind: BlockKind::Table(Some("n")),
                 lines: vec!["\\№ tt", "/aa/", "\\№-", "/bb/"]
             },
             Block {
-                kind: BlockKind::Table,
+                kind: BlockKind::Table(Some("n")),
                 lines: vec!["\\№ uu", "/cc/", "\\№-", "/dd/"]
             }
         ];
