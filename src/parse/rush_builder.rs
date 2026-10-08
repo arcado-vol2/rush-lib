@@ -170,8 +170,8 @@ struct Image<'a> {
 
 struct List {
     //TODO idk, something hard here
-}
 
+}
 struct Header<'a> {
     level: u8,
     text: Vec<Span<'a>>
