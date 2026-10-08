@@ -367,7 +367,6 @@ fn split_blocks<'a>(source: &'a str) -> FlatLexedProject<'a> {
                                         found_format = true; 
                                     }
                                 },
-                                
                                 LineKind::TableClose => {
                                     if !found_format {
                                         flush_par(&mut project.blocks, line.formated, &mut par_is_open);
@@ -435,11 +434,10 @@ fn split_blocks<'a>(source: &'a str) -> FlatLexedProject<'a> {
                                 merge_flush(&mut project.blocks, line.formated);
                             },
                             _ => ()
-                            
+        
                         }
                     }
             }
-        
         current+=1;
     }   
     project
@@ -448,7 +446,8 @@ fn split_blocks<'a>(source: &'a str) -> FlatLexedProject<'a> {
 
 #[cfg(test)] mod test {
     use std::{borrow::Cow, collections::{HashMap, HashSet}, vec};
-    use crate::parse::{block_fragmentation::{FlatLexedProject, split_blocks}, lexemas::{Block, BlockKind::{self, Header}, ImageKind, Named}};
+
+use crate::parse::{block_fragmentation::{FlatLexedProject, split_blocks}, lexemas::{Block, BlockKind::{self, Header}, ImageKind, Named}};
 
     fn project<'a>(blocks: Vec<Block<'a>>) -> FlatLexedProject<'a> {
         FlatLexedProject { blocks, ..Default::default() }
@@ -1580,8 +1579,8 @@ fn split_blocks<'a>(source: &'a str) -> FlatLexedProject<'a> {
             ..Default::default()
         };
         assert_eq!(out, expected);
-    }
 
+    }
     // ===== General =====
     #[test]
     fn block_check_empty_bom_and_blank_lines() {
@@ -1662,8 +1661,8 @@ fn split_blocks<'a>(source: &'a str) -> FlatLexedProject<'a> {
             }
         ]);
         assert_eq!(out, expected);
-    }
 
+    }
     // ===== Space between \ and tag =====
     #[test]
     fn block_check_header_p_space_after_mark() {
@@ -1801,8 +1800,8 @@ fn split_blocks<'a>(source: &'a str) -> FlatLexedProject<'a> {
             }
         ]);
         assert_eq!(out, expected);
-    }
 
+    }
     // ===== Paragraph =====
     #[test]
     fn block_check_header_p_empty_parts_dropped() {
@@ -1823,8 +1822,8 @@ fn split_blocks<'a>(source: &'a str) -> FlatLexedProject<'a> {
             }
         ]);
         assert_eq!(out, expected);
-    }
 
+    }
     // ===== Header =====
     #[test]
     fn block_check_header_p_only_spaces_after_tag() {
@@ -1898,8 +1897,8 @@ fn split_blocks<'a>(source: &'a str) -> FlatLexedProject<'a> {
             }
         ]);
         assert_eq!(out, expected);
-    }
 
+    }
     // ===== List =====
     #[test]
     fn block_check_list_deep_levels() {
@@ -2043,8 +2042,8 @@ fn split_blocks<'a>(source: &'a str) -> FlatLexedProject<'a> {
             ..Default::default()
         };
         assert_eq!(out, expected);
-    }
 
+    }
     // ===== Image =====
     #[test]
     fn block_check_image_no_scale() {
@@ -2279,8 +2278,8 @@ fn split_blocks<'a>(source: &'a str) -> FlatLexedProject<'a> {
             ..Default::default()
         };
         assert_eq!(out, expected);
-    }
 
+    }
     // ===== Note =====
     #[test]
     fn block_check_note_anon() {
@@ -2365,8 +2364,8 @@ fn split_blocks<'a>(source: &'a str) -> FlatLexedProject<'a> {
             }
         ]);
         assert_eq!(out, expected);
-    }
 
+    }
     // ===== Comment =====
     #[test]
     fn block_check_comment_tag_with_text_inside() {
@@ -2455,8 +2454,8 @@ fn split_blocks<'a>(source: &'a str) -> FlatLexedProject<'a> {
             }
         ]);
         assert_eq!(out, expected);
-    }
 
+    }
     // ===== Formula =====
     #[test]
     fn block_check_formula_empty() {
@@ -2533,8 +2532,8 @@ fn split_blocks<'a>(source: &'a str) -> FlatLexedProject<'a> {
             }
         ]);
         assert_eq!(out, expected);
-    }
 
+    }
     // ===== Code =====
     #[test]
     fn block_check_code_empty() {
@@ -2632,8 +2631,8 @@ fn split_blocks<'a>(source: &'a str) -> FlatLexedProject<'a> {
             ..Default::default()
         };
         assert_eq!(out, expected);
-    }
 
+    }
     // ===== Table =====
     #[test]
     fn block_check_table_no_format() {
@@ -2969,4 +2968,3 @@ fn split_blocks<'a>(source: &'a str) -> FlatLexedProject<'a> {
         assert_eq!(out, expected);
     }
 }
-    

@@ -111,17 +111,18 @@ fn ru_hex_handler(c: char) -> Option<u8> {
     }
 }
 
-enum SpanAtribute {
+enum SpanAtribute<'a> {
     Bold,
     Italic,
     Strike,
     Underline,
     Monon,
+    Link(&'a str),
     Colored(Color)
 }
 
 struct Span<'a>{
-    attributes: HashSet<SpanAtribute>,
+    attributes: HashSet<SpanAtribute<'a>>,
     text: Cow<'a, str>
 }
 

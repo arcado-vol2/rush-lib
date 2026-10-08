@@ -7,12 +7,14 @@ fn is_should_be_changed(ch: char) -> bool {
     ch == SHIELD || ch ==MARK || ch == SMALL_YO || ch.is_uppercase()
 }
 
-fn is_shealdable(ch: char) -> bool {
+fn is_inline_marking(ch: char) -> bool {
     matches!(
         ch,
-        MARK | SHIELD | BOLD | ITALIC | STRIKE | UNDER |MONO | COLOR | LBRACE | RBRACE | CODE
+        MARK | SHIELD | BOLD | ITALIC | STRIKE | UNDER | MONO | COLOR | LBRACE | RBRACE
     )
 }
+
+
 
 
 #[derive(PartialEq, Debug, Clone, Copy)]
@@ -33,12 +35,13 @@ pub(crate) fn clear_name_attribute<'a>(line: &'a str) -> Cow<'a, str> {
     let mut out = String::with_capacity(line.len());
     out.push_str(&line[..first]);
     
-    let mut chars = line[first..].chars();
-    let mut braces_stack: Vec<InlineElement> = Vec::with_capacity(line.len());
+    let mut chars = line[first..].chars().peekable();
+    let mut braces_stack: Vec<InlineElement> = Vec::new();
     let mut in_color = false;
+    let mut color_brace_counter = 0;
 
     fn push_closer(braces_stack: &mut Vec<InlineElement>, out: &mut String, kind: InlineElement, ch: &char){
-        if let Some(pos) = *&braces_stack.iter().rposition(|&open| open == kind) {
+        if let Some(pos) = braces_stack.iter().rposition(|&open| open == kind) {
             braces_stack.truncate(pos);
         } else {
             out.push(*ch);
@@ -49,20 +52,19 @@ pub(crate) fn clear_name_attribute<'a>(line: &'a str) -> Cow<'a, str> {
     while let Some(ch) = chars.next() {
         match ch {
             SHIELD => {
-                println!(" found SHIELD");
-                if let Some(next) = chars.next() {
-                    if is_shealdable(next) {
+                if let Some(next) = chars.next_if(|&c| is_inline_marking(c)) {
+                    if is_inline_marking(next) {
                         out.push(next);
                     } else {
                         out.push(ch);
-                        out.push(next);
                     }
                 } else {
                     out.push(ch);
                 }
             },
             MARK => {
-                if let Some(next) = chars.next() {
+                //TODO use peak here
+                if let Some(next) = chars.next_if(|&c| ) {
                     match next {
                         BOLD => braces_stack.push(InlineElement::Bold),
                         ITALIC => braces_stack.push(InlineElement::Italic),
@@ -71,9 +73,9 @@ pub(crate) fn clear_name_attribute<'a>(line: &'a str) -> Cow<'a, str> {
                         MONO => braces_stack.push(InlineElement::Mono),
                         COLOR => {
                             braces_stack.push(InlineElement::Color);
-                            in_color = true
+                            in_color = true;
                         },
-                        _ => ()
+                        _ => out.push(next),
                     }
                 }
 
@@ -81,20 +83,31 @@ pub(crate) fn clear_name_attribute<'a>(line: &'a str) -> Cow<'a, str> {
             _ => {
                 if in_color { 
                     if ch == LBRACE{
-                        in_color = false
-                    } else {
-                    }
+                        in_color = false;
+                        color_brace_counter = 1;
+                    } 
                 }
                 else {
-                    let ch =ch.to_lowercase().next().unwrap();
+                    let ch = ch.to_lowercase().next().unwrap();
                     match ch {
-                        LBRACE => in_color = false,
+                        LBRACE => {
+                            in_color = false;
+                            color_brace_counter += 1;
+                            out.push(ch);
+                        },
                         BOLD => push_closer(&mut braces_stack, &mut out, InlineElement::Bold, &ch),
                         ITALIC => push_closer(&mut braces_stack, &mut out, InlineElement::Italic, &ch),
                         MONO => push_closer(&mut braces_stack, &mut out, InlineElement::Mono, &ch),
                         STRIKE => push_closer(&mut braces_stack, &mut out, InlineElement::Strike, &ch),
                         UNDER => push_closer(&mut braces_stack, &mut out, InlineElement::Under, &ch),
-                        RBRACE => push_closer(&mut braces_stack, &mut out, InlineElement::Color, &ch),
+                        RBRACE => {
+                            color_brace_counter = 0.max(color_brace_counter - 1);
+                            if color_brace_counter == 0 {
+                                push_closer(&mut braces_stack, &mut out, InlineElement::Color, &ch)
+                            } else {
+                                out.push(ch);
+                            }
+                        },
                         SMALL_YO => out.push(SMALL_E),
                         _ => out.push(ch)
                     }
@@ -182,6 +195,33 @@ fn clear_name_link<'a>(line: &'a str) -> Cow<'a, str> {
     #[test]
     fn check_line_clear_name_color_constant() {
         check("до \\%КРАС(красный) после", "до красный после");
+    }
+
+    #[test]
+    fn check_line_clear_invalid_after_mark(){
+        check("\\Abc","abc");
+    }
+
+    #[test]
+    fn check_line_clear_braces_in_name(){
+        check("F(x)", "f(x)");
+    }
+
+    #[test]
+    fn check_line_clear_shealding() {
+        check("snake_Case", "snake_case");
+        check("snake_ёж", "snake_еж");
+    }
+
+    #[test]
+    fn check_line_clear_brace_balance() {
+        check("\\%R(a(b)c)", "a(b)c");
+        check("\\%К(a (b \\%С(c) d) e)", "a(b c d) e");
+    }
+
+    #[test]
+    fn check_line_clear_unknown_gliph_after_mark(){
+        check("\\*p(A)", "*p(a)");
     }
 
     #[test]
