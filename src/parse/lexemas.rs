@@ -6,13 +6,11 @@ pub(crate) const SPACE: char = ' ';
 pub(crate) const HEADER: char = '+';
 pub(crate) const BULLET_LIST: char = '.';
 pub(crate) const NUMERIC_LIST: char = '1';
-pub(crate) const IMG_LBRACE: char = '(';
-pub(crate) const IMG_RBRACE: char = ')';
 pub(crate) const IMG_SEP: char = ',';
 pub(crate) const FORMULA: char = '$';
 pub(crate) const LINK: char = ',';
-pub(crate) const LINK_LBRACE: char = '(';
-pub(crate) const LINK_RBRACE: char = ')';
+pub(crate) const LBRACE: char = '(';
+pub(crate) const RBRACE: char = ')';
 pub(crate) const NOTE: char = '*';
 pub(crate) const ANON: char = '0';
 pub(crate) const COMMENT: char = '\"';
@@ -33,6 +31,13 @@ pub(crate) const TABLE_MERGE_LEFT: char = '+';
 pub(crate) const TABLE_MERGE_UP: char = '=';
 pub(crate) const NEW_LINE: char = '\n';
 pub(crate) const SHIELD: char = '_'; 
+pub(crate) const QUOTES: char = '"'; 
+pub(crate) const SMALL_YO: char = 'ё';
+pub(crate) const BIG_YO: char = 'Ё';
+pub(crate) const SMALL_E: char = 'е';
+pub(crate) const BIG_E: char = 'Е';
+
+pub(crate) const BYTE_SHIELD: u8 = b'_';
 
 pub(crate) fn is_blank(c: char) -> bool{
     matches!(c, SPACE | TAB | CR)
@@ -49,6 +54,7 @@ impl Tag {
     pub(crate) const fn new(ch: char, count: usize) -> Self {
          Self { ch, count }
     }
+
     pub(crate) fn strip<'a>(&self, s: &'a str) -> Option<&'a str> {
         let mut rest = s;
         for _ in 0..self.count {
@@ -56,6 +62,7 @@ impl Tag {
         }
         Some(rest)
     }
+    
     pub(crate) fn is(&self, s: &str) -> bool {
         self.strip(s) == Some("")
     }
@@ -70,24 +77,41 @@ pub(crate)const BULLET_LIST_TAG: Tag = Tag::new(BULLET_LIST, 1);
 pub(crate)const NUMERIC_LIST_TAG: Tag = Tag::new(NUMERIC_LIST, 1);
 pub(crate)const ANON_NAME_TAG: Tag = Tag::new(ANON, 1);
 
+
+
+
 pub(crate) const NEW_LINE_BREAK: usize = 2;
 
 #[derive(PartialEq, Debug)]
 pub(crate) struct ImageKind<'a> {
     pub(crate) label: Option<&'a str>,
-    pub(crate) scale: u16
+    pub(crate) scale: u16,
+    pub(crate) index: u16
 }
+#[derive(PartialEq, Debug)]
+pub(crate) struct Named<'a> {
+    name: Option<&'a str>,
+    index: u16
+}
+impl<'a> Named<'a> {
+    pub(crate) fn none() -> Self {
+        Self { name: None, index: 0 }
+    }
 
+    pub(crate) fn new(name: Option<&'a str>, index: u16) -> Self {
+        Self {name, index}
+    }
+}
 
 #[derive(PartialEq, Debug)]
 pub(crate) enum BlockKind<'a> {
     Paragraph,
     List,
-    Table(Option<&'a str>),
+    Table(Named<'a>),
     Header(u8),
     Comment,
-    Formula(Option<&'a str>),
-    Code(Option<&'a str>),
+    Formula(Named<'a>),
+    Code(Named<'a>),
     Image(ImageKind<'a>),
     Note(u16)
 }
