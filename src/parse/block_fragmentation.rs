@@ -434,10 +434,11 @@ fn split_blocks<'a>(source: &'a str) -> FlatLexedProject<'a> {
                                 merge_flush(&mut project.blocks, line.formated);
                             },
                             _ => ()
-        
+                            
                         }
                     }
             }
+        
         current+=1;
     }   
     project
@@ -1579,9 +1580,10 @@ use crate::parse::{block_fragmentation::{FlatLexedProject, split_blocks}, lexema
             ..Default::default()
         };
         assert_eq!(out, expected);
-
     }
+
     // ===== General =====
+
     #[test]
     fn block_check_empty_bom_and_blank_lines() {
         let source = "\u{FEFF}\n  \n\t";
@@ -1661,9 +1663,10 @@ use crate::parse::{block_fragmentation::{FlatLexedProject, split_blocks}, lexema
             }
         ]);
         assert_eq!(out, expected);
-
     }
+
     // ===== Space between \ and tag =====
+
     #[test]
     fn block_check_header_p_space_after_mark() {
         let source = "\\ + aa\n\\   ++ aa\n\\\t+ aa";
@@ -1800,9 +1803,10 @@ use crate::parse::{block_fragmentation::{FlatLexedProject, split_blocks}, lexema
             }
         ]);
         assert_eq!(out, expected);
-
     }
+
     // ===== Paragraph =====
+
     #[test]
     fn block_check_header_p_empty_parts_dropped() {
         let source = "\n\\+ aa\nbb\n\\+ cc\n\n";
@@ -1822,9 +1826,10 @@ use crate::parse::{block_fragmentation::{FlatLexedProject, split_blocks}, lexema
             }
         ]);
         assert_eq!(out, expected);
-
     }
+
     // ===== Header =====
+
     #[test]
     fn block_check_header_p_only_spaces_after_tag() {
         let source = "\\++   ";
@@ -1897,9 +1902,10 @@ use crate::parse::{block_fragmentation::{FlatLexedProject, split_blocks}, lexema
             }
         ]);
         assert_eq!(out, expected);
-
     }
+
     // ===== List =====
+
     #[test]
     fn block_check_list_deep_levels() {
         let source = "\\. aa\n\\   . bb\n\\1 cc\n\\1 dd";
@@ -2042,9 +2048,10 @@ use crate::parse::{block_fragmentation::{FlatLexedProject, split_blocks}, lexema
             ..Default::default()
         };
         assert_eq!(out, expected);
-
     }
+
     // ===== Image =====
+
     #[test]
     fn block_check_image_no_scale() {
         let source = "\\(aa, bb)";
@@ -2278,9 +2285,10 @@ use crate::parse::{block_fragmentation::{FlatLexedProject, split_blocks}, lexema
             ..Default::default()
         };
         assert_eq!(out, expected);
-
     }
+
     // ===== Note =====
+
     #[test]
     fn block_check_note_anon() {
         let source = "\\**0 aa";
@@ -2364,9 +2372,10 @@ use crate::parse::{block_fragmentation::{FlatLexedProject, split_blocks}, lexema
             }
         ]);
         assert_eq!(out, expected);
-
     }
+
     // ===== Comment =====
+
     #[test]
     fn block_check_comment_tag_with_text_inside() {
         let source = "\\\"\naa\n\\\" bb\n\\\"";
@@ -2454,9 +2463,10 @@ use crate::parse::{block_fragmentation::{FlatLexedProject, split_blocks}, lexema
             }
         ]);
         assert_eq!(out, expected);
-
     }
+
     // ===== Formula =====
+
     #[test]
     fn block_check_formula_empty() {
         let source = "\\$ aa\n\\$";
@@ -2532,9 +2542,10 @@ use crate::parse::{block_fragmentation::{FlatLexedProject, split_blocks}, lexema
             }
         ]);
         assert_eq!(out, expected);
-
     }
+
     // ===== Code =====
+
     #[test]
     fn block_check_code_empty() {
         let source = "\\// aa\n\\//";
@@ -2631,9 +2642,10 @@ use crate::parse::{block_fragmentation::{FlatLexedProject, split_blocks}, lexema
             ..Default::default()
         };
         assert_eq!(out, expected);
-
     }
+
     // ===== Table =====
+
     #[test]
     fn block_check_table_no_format() {
         let source = "\\№ tt\n/aa/bb/\n\\№-\n/cc/dd/\n\\№";

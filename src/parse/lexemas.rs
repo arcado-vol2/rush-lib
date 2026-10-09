@@ -54,6 +54,7 @@ impl Tag {
     pub(crate) const fn new(ch: char, count: usize) -> Self {
          Self { ch, count }
     }
+
     pub(crate) fn strip<'a>(&self, s: &'a str) -> Option<&'a str> {
         let mut rest = s;
         for _ in 0..self.count {
@@ -61,11 +62,11 @@ impl Tag {
         }
         Some(rest)
     }
+
     pub(crate) fn is(&self, s: &str) -> bool {
         self.strip(s) == Some("")
     }
 }
-
 
 pub(crate)const CODE_TAG: Tag = Tag::new(CODE, 2);
 pub(crate)const COMMENT_TAG: Tag = Tag::new(COMMENT, 1);
