@@ -1,6 +1,6 @@
 use std::borrow::Cow;
 
-use crate::parse::lexemas::{BOLD, BYTE_SHIELD, COLOR, ITALIC, LBRACE, MARK, MONO, RBRACE, SHIELD, SMALL_E, SMALL_YO, STRIKE, UNDER};
+use crate::parse::lexemas::{BOLD, BYTE_SHIELD, COLOR, ITALIC, LBRACE, LINK, MARK, MONO, NOTE, RBRACE, RefKind, SHIELD, SMALL_E, SMALL_YO, SPACE, STRIKE, UNDER, ref_kind};
 
 
 #[derive(Debug, PartialEq)]
@@ -124,7 +124,6 @@ fn is_inline_marking(ch: char) -> bool {
         MARK | SHIELD | BOLD | ITALIC | STRIKE | UNDER | MONO | COLOR | LBRACE | RBRACE
     )
 }
-
 
 
 
@@ -275,28 +274,27 @@ struct Style{
     color: Color
 }
 
-
 #[derive(Debug, PartialEq)]
-enum Mark {
+enum Mark<'a> {
     Bold,
     Italic,
     Strike,
     Under,
     Mono,
-    Color(Color),
+    Color(Color, u32),
+    Link(&'a str, u32)
 }
 
 
 #[derive(Debug)]
-struct Opened {
-    mark: Mark,
+struct Opened<'a> {
+    mark: Mark<'a>,
     start: usize,
-    depth: u32
 }
 
 #[derive(Debug, PartialEq)]
-struct Range {
-    mark: Mark,
+struct Range<'a> {
+    mark: Mark<'a>,
     start: usize,
     end: usize
 }
@@ -304,17 +302,19 @@ struct Range {
 #[derive(Debug, PartialEq)]
 enum InlineText<'a> {
     String(&'a str),
+    InnerLink(&'a str, RefKind),
+    Note(u16),
     Empty
 }
 
 #[derive(Debug, PartialEq)]
-struct PreparsedLine<'a> {
+struct PreparsedLines<'a> {
     text: Vec<InlineText<'a>>,
-    style_ranges: Vec<Range>
+    style_ranges: Vec<Range<'a>>
 }
 
-impl<'a> PreparsedLine<'a> {
-    fn try_pop_stack(open_stack: &mut Vec<Opened>, is_target: impl Fn(&Opened) -> bool) -> Option<Opened>{
+impl<'a> PreparsedLines<'a> {
+    fn try_pop_stack(open_stack: &mut Vec<Opened<'a>>, is_target: impl Fn(&Opened) -> bool) -> Option<Opened<'a>>{
         let pos = open_stack.iter().rposition(is_target)?;
         let target = open_stack.remove(pos);
         open_stack.truncate(pos);
@@ -332,56 +332,106 @@ impl<'a> PreparsedLine<'a> {
             text: Vec::new(),
             style_ranges: Vec::new()
         };
-
         for line in lines{
             let mut open_stack: Vec<Opened> = Vec::new();
             let mut chars = line.char_indices().peekable();
             let mut byte_after_last_tag = 0;
+            let mut brace_depth: u32 = 0;
             while let Some((i, ch)) = chars.next(){
-                match ch {
+                println!("{}, {}", i, ch);
+                match ch {    
                     MARK => {
                         if let Some((next_i, next_ch)) = chars.peek() {
                             match *next_ch {
                                 BOLD => {
                                     Self::push_range_to_out(&mut out, line, byte_after_last_tag, i);
                                     byte_after_last_tag = next_i + next_ch.len_utf8();
-                                    open_stack.push(Opened { mark: Mark::Bold, start: out.text.len(), depth: 0});
+                                    open_stack.push(Opened { mark: Mark::Bold, start: out.text.len()});
                                     chars.next();
                                 },
                                 ITALIC => {
                                     Self::push_range_to_out(&mut out, line, byte_after_last_tag, i);
                                     byte_after_last_tag = next_i + next_ch.len_utf8();
-                                    open_stack.push(Opened { mark: Mark::Italic, start: out.text.len(), depth: 0 });
+                                    open_stack.push(Opened { mark: Mark::Italic, start: out.text.len()});
                                     chars.next();
                                 },
                                 STRIKE => {
                                     Self::push_range_to_out(&mut out, line, byte_after_last_tag, i);
                                     byte_after_last_tag = next_i + next_ch.len_utf8();
-                                    open_stack.push(Opened { mark: Mark::Strike, start: out.text.len(), depth: 0 });
+                                    open_stack.push(Opened { mark: Mark::Strike, start: out.text.len()});
                                     chars.next();
                                 },
                                 UNDER => {
                                     Self::push_range_to_out(&mut out, line, byte_after_last_tag, i);
                                     byte_after_last_tag = next_i + next_ch.len_utf8();
-                                    open_stack.push(Opened { mark: Mark::Under, start: out.text.len(), depth: 0 });
+                                    open_stack.push(Opened { mark: Mark::Under, start: out.text.len()});
                                     chars.next();
                                 },
                                 MONO => {
                                     Self::push_range_to_out(&mut out, line, byte_after_last_tag, i);
                                     byte_after_last_tag = next_i + next_ch.len_utf8();
-                                    open_stack.push(Opened { mark: Mark::Mono, start: out.text.len(), depth: 0 });
+                                    open_stack.push(Opened { mark: Mark::Mono, start: out.text.len()});
                                     chars.next();
                                 },
                                 COLOR => {
                                     let param_start = *next_i + COLOR.len_utf8();
                                     match chars.find(|&(_, c)| c == LBRACE) {
-                                        Some((brace_i, _)) => {
+                                        Some((brace_i, i_ch)) => {
+                                            Self::push_range_to_out(&mut out, line, byte_after_last_tag, i);
                                             let color = Color::from_unknown_string(&line[param_start..brace_i]);
-                                            println!("{color:?}");
+                                            byte_after_last_tag = brace_i + i_ch.len_utf8();
+                                            open_stack.push(
+                                                Opened { mark: Mark::Color(color, brace_depth), start: out.text.len()}
+                                            );
+                                            brace_depth += 1;
                                         }
-                                        None => ()
+                                        None => {
+                                            Self::push_range_to_out(&mut out, line, byte_after_last_tag, i);
+                                            byte_after_last_tag = line.len();
+                                        }
                                     }
-                                    
+                                },
+                                NOTE => {
+                                    chars.next();
+                                    Self::push_range_to_out(&mut out, line, byte_after_last_tag, i);
+                                    if let Some(&(l_i, l_c)) = chars.peek() && let Some(kind) = ref_kind(l_c) && line[l_i + l_c.len_utf8()..].starts_with(LBRACE){
+                                        chars.next();
+                                        chars.next();
+                                    } else if let Some((start, _)) = chars.next_if(|&(_, c)| c.is_ascii_digit()) {
+                                        let mut end = start + 1;
+                                        while let Some(_) = chars.next_if(|&(_, c)| c.is_ascii_digit()){
+                                            end += 1;
+                                        }
+                                        let n = line[start..end].parse::<u16>().unwrap_or(u16::MAX);
+                                        out.text.push(InlineText::Note(n));
+                                        if let Some(_) = chars.next_if(|&(_, c)| c == SPACE) {
+                                            byte_after_last_tag = end + SPACE.len_utf8();    
+                                        } else {
+                                            byte_after_last_tag = end;
+                                        }
+                                    } else {
+                                        chars.next();
+                                        chars.next();
+                                        byte_after_last_tag = i + MARK.len_utf8() + NOTE.len_utf8();
+                                    }
+                                }
+                                LINK => {
+                                    let param_start = *next_i + LINK.len_utf8();
+                                    match chars.find(|&(_, c)| c == LBRACE) {
+                                        Some((brace_i, i_ch)) => {
+                                            Self::push_range_to_out(&mut out, line, byte_after_last_tag, i);
+                                            let ref_link = &line[param_start..brace_i];
+                                            byte_after_last_tag = brace_i + i_ch.len_utf8();
+                                            open_stack.push(
+                                                Opened { mark: Mark::Link(ref_link, brace_depth), start: out.text.len()}
+                                            );
+                                            brace_depth += 1;
+                                        }
+                                        None => {
+                                            Self::push_range_to_out(&mut out, line, byte_after_last_tag, i);
+                                            byte_after_last_tag = line.len();
+                                        }
+                                    }
                                 }
                                 _ => {
                                     Self::push_range_to_out(&mut out, line, byte_after_last_tag, i);
@@ -441,9 +491,26 @@ impl<'a> PreparsedLine<'a> {
                             );
                         }
                     },
+                    LBRACE => {
+                        brace_depth = brace_depth.saturating_add(1);
+                    },
+                    RBRACE => {
+                        brace_depth = brace_depth.saturating_sub(1);
+                        if let Some(opened) = Self::try_pop_stack(
+                            &mut open_stack, |t| matches!(t.mark, Mark::Color(_, d) | Mark::Link(_, d) if d == brace_depth)
+                        ) {
+                            println!("Depth is zero also color in stack: {opened:?}");
+                            Self::push_range_to_out(&mut out, line, byte_after_last_tag, i);
+                            byte_after_last_tag = i + ch.len_utf8();
+                            out.style_ranges.push(
+                                Range { mark: opened.mark, start: opened.start, end: out.text.len() }
+                            );
+                        }
+                    },
                     _ => {
                     }
                 }
+                println!("out: {:?},   open_stack: {:?},  close_stac: {:?},     bs:{:?}", out.text, open_stack, out.style_ranges, byte_after_last_tag);
             }
             Self::push_range_to_out(&mut out, line, byte_after_last_tag, line.len());
             for open in open_stack.into_iter().rev() {
@@ -475,36 +542,38 @@ impl<'a> PreparsedLine<'a> {
 
     #[test]
     fn main() {
-        let out = PreparsedLine::new(vec!["text \\%#ЗАЛЭПА(text)"]);
+        let out = PreparsedLines::new(vec!["три\\%КРАС(\\,https://google.com/email=?(гугл))"]);
+        println!();
+        println!("---RESULT---");
         println!("{out:?}")
     }
 
 
     #[test]
     fn check_line_preparsed_line_common() {
-        let out = PreparsedLine::new(vec!["\\:a:"]);
-        let expected = PreparsedLine {
+        let out = PreparsedLines::new(vec!["\\:a:"]);
+        let expected = PreparsedLines {
             text: vec![InlineText::String("a")],
             style_ranges: vec![Range{mark: Mark::Bold, start: 0, end: 1}]
         };
         assert_eq!(out, expected);
 
-        let out = PreparsedLine::new(vec!["\\:a:b\\;c;"]);
-        let expected = PreparsedLine {
+        let out = PreparsedLines::new(vec!["\\:a:b\\;c;"]);
+        let expected = PreparsedLines {
             text: vec![InlineText::String("a"), InlineText::String("b"), InlineText::String("c")],
             style_ranges: vec![Range{mark: Mark::Bold, start: 0, end: 1}, Range{mark: Mark::Italic, start: 2, end: 3}]
         };
         assert_eq!(out, expected);
 
-        let out = PreparsedLine::new(vec!["\\;:x;"]);
-        let expected = PreparsedLine {
+        let out = PreparsedLines::new(vec!["\\;:x;"]);
+        let expected = PreparsedLines {
             text: vec![InlineText::String(":x")],
             style_ranges: vec![Range{mark: Mark::Italic, start: 0, end: 1}]
         };
         assert_eq!(out, expected);
 
-        let out = PreparsedLine::new(vec!["\\;\\:a:;"]);
-        let expected = PreparsedLine {
+        let out = PreparsedLines::new(vec!["\\;\\:a:;"]);
+        let expected = PreparsedLines {
             text: vec![InlineText::String("a")],
             style_ranges: vec![Range{mark: Mark::Bold, start: 0, end: 1}, Range{mark: Mark::Italic, start: 0, end: 1}]
         };
@@ -512,29 +581,29 @@ impl<'a> PreparsedLine<'a> {
 
         // ===== Mono =====
 
-        let out = PreparsedLine::new(vec!["\\!a!"]);
-        let expected = PreparsedLine {
+        let out = PreparsedLines::new(vec!["\\!a!"]);
+        let expected = PreparsedLines {
             text: vec![InlineText::String("a")],
             style_ranges: vec![Range{mark: Mark::Mono, start: 0, end: 1}]
         };
         assert_eq!(out, expected);
 
-        let out = PreparsedLine::new(vec!["\\!a!b\\-c-"]);
-        let expected = PreparsedLine {
+        let out = PreparsedLines::new(vec!["\\!a!b\\-c-"]);
+        let expected = PreparsedLines {
             text: vec![InlineText::String("a"), InlineText::String("b"), InlineText::String("c")],
             style_ranges: vec![Range{mark: Mark::Mono, start: 0, end: 1}, Range{mark: Mark::Strike, start: 2, end: 3}]
         };
         assert_eq!(out, expected);
 
-        let out = PreparsedLine::new(vec!["\\!-x!"]);
-        let expected = PreparsedLine {
+        let out = PreparsedLines::new(vec!["\\!-x!"]);
+        let expected = PreparsedLines {
             text: vec![InlineText::String("-x")],
             style_ranges: vec![Range{mark: Mark::Mono, start: 0, end: 1}]
         };
         assert_eq!(out, expected);
 
-        let out = PreparsedLine::new(vec!["\\!\\=a=!"]);
-        let expected = PreparsedLine {
+        let out = PreparsedLines::new(vec!["\\!\\=a=!"]);
+        let expected = PreparsedLines {
             text: vec![InlineText::String("a")],
             style_ranges: vec![Range{mark: Mark::Under, start: 0, end: 1}, Range{mark: Mark::Mono, start: 0, end: 1}]
         };
@@ -542,29 +611,29 @@ impl<'a> PreparsedLine<'a> {
 
         // ===== Strike =====
 
-        let out = PreparsedLine::new(vec!["\\-a-"]);
-        let expected = PreparsedLine {
+        let out = PreparsedLines::new(vec!["\\-a-"]);
+        let expected = PreparsedLines {
             text: vec![InlineText::String("a")],
             style_ranges: vec![Range{mark: Mark::Strike, start: 0, end: 1}]
         };
         assert_eq!(out, expected);
 
-        let out = PreparsedLine::new(vec!["\\-a-b\\=c="]);
-        let expected = PreparsedLine {
+        let out = PreparsedLines::new(vec!["\\-a-b\\=c="]);
+        let expected = PreparsedLines {
             text: vec![InlineText::String("a"), InlineText::String("b"), InlineText::String("c")],
             style_ranges: vec![Range{mark: Mark::Strike, start: 0, end: 1}, Range{mark: Mark::Under, start: 2, end: 3}]
         };
         assert_eq!(out, expected);
 
-        let out = PreparsedLine::new(vec!["\\-!x-"]);
-        let expected = PreparsedLine {
+        let out = PreparsedLines::new(vec!["\\-!x-"]);
+        let expected = PreparsedLines {
             text: vec![InlineText::String("!x")],
             style_ranges: vec![Range{mark: Mark::Strike, start: 0, end: 1}]
         };
         assert_eq!(out, expected);
 
-        let out = PreparsedLine::new(vec!["\\-\\!a!-"]);
-        let expected = PreparsedLine {
+        let out = PreparsedLines::new(vec!["\\-\\!a!-"]);
+        let expected = PreparsedLines {
             text: vec![InlineText::String("a")],
             style_ranges: vec![Range{mark: Mark::Mono, start: 0, end: 1}, Range{mark: Mark::Strike, start: 0, end: 1}]
         };
@@ -572,29 +641,29 @@ impl<'a> PreparsedLine<'a> {
 
         // ===== Under =====
 
-        let out = PreparsedLine::new(vec!["\\=a="]);
-        let expected = PreparsedLine {
+        let out = PreparsedLines::new(vec!["\\=a="]);
+        let expected = PreparsedLines {
             text: vec![InlineText::String("a")],
             style_ranges: vec![Range{mark: Mark::Under, start: 0, end: 1}]
         };
         assert_eq!(out, expected);
 
-        let out = PreparsedLine::new(vec!["\\=a=b\\!c!"]);
-        let expected = PreparsedLine {
+        let out = PreparsedLines::new(vec!["\\=a=b\\!c!"]);
+        let expected = PreparsedLines {
             text: vec![InlineText::String("a"), InlineText::String("b"), InlineText::String("c")],
             style_ranges: vec![Range{mark: Mark::Under, start: 0, end: 1}, Range{mark: Mark::Mono, start: 2, end: 3}]
         };
         assert_eq!(out, expected);
 
-        let out = PreparsedLine::new(vec!["\\=:x="]);
-        let expected = PreparsedLine {
+        let out = PreparsedLines::new(vec!["\\=:x="]);
+        let expected = PreparsedLines {
             text: vec![InlineText::String(":x")],
             style_ranges: vec![Range{mark: Mark::Under, start: 0, end: 1}]
         };
         assert_eq!(out, expected);
 
-        let out = PreparsedLine::new(vec!["\\=\\-a-="]);
-        let expected = PreparsedLine {
+        let out = PreparsedLines::new(vec!["\\=\\-a-="]);
+        let expected = PreparsedLines {
             text: vec![InlineText::String("a")],
             style_ranges: vec![Range{mark: Mark::Strike, start: 0, end: 1}, Range{mark: Mark::Under, start: 0, end: 1}]
         };

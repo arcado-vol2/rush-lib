@@ -115,7 +115,7 @@ pub(crate) enum BlockKind<'a> {
     Image(ImageKind<'a>),
     Note(u16)
 }
-
+#[derive(Debug, PartialEq)]
 pub(crate) enum RefKind {
     Formula,
     Table,
@@ -123,6 +123,15 @@ pub(crate) enum RefKind {
     Image
 }
 
+pub(crate) fn ref_kind(c: char) -> Option<RefKind> {
+    match c {
+        'ф' => Some(RefKind::Formula),
+        'т' => Some(RefKind::Table),
+        'л' => Some(RefKind::Code),
+        'р' => Some(RefKind::Image),
+        _ => None
+    }
+}
 
 #[derive(PartialEq, Debug)]
 pub(crate) enum LexemaKind {
