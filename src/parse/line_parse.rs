@@ -1,4 +1,5 @@
 use std::borrow::Cow;
+use std::ops::{Add, AddAssign};
 
 use crate::parse::lexemas::{BOLD, BYTE_SHIELD, COLOR, ITALIC, LBRACE, LINK, MARK, MONO, NOTE, RBRACE, RefKind, SHIELD, SMALL_E, SMALL_YO, SPACE, STRIKE, UNDER, ref_kind};
 
@@ -27,32 +28,67 @@ impl Color {
     const LAZULI: Self = Self {r: 38, g: 97, b: 156};
     const FUCHSIA: Self = Self {r: 255, g: 0, b: 255};
     
+    fn ru_color_const(line: &str) -> Option<Color> {
+        match line {
+            "КРАС" => Some(Color::RED),
+            "ОРАН" => Some(Color::ORANGE),
+            "ЖЁЛ" | "ЖЕЛ" => Some(Color::YELLOW),
+            "ЗЕЛ" => Some(Color::GREEN),
+            "ГОЛ" => Some(Color::LIGHT_BLUE),
+            "СИН" => Some(Color::DARK_BLUE),
+            "ФИОЛ" => Some(Color::MAGENTA),
+            "РОЗ" => Some(Color::PINK),
+            "КОР" => Some(Color::BROWN),
+            "ЛИМ" => Some(Color::LEMON),
+            "САЛ" => Some(Color::CHARTREUSE),
+            "БИР" => Some(Color::CYAN),
+            "ЛАЗ" => Some(Color::LAZULI),
+            "ФУК" => Some(Color::FUCHSIA),
+            "БЕЛ" => Some(Color::WHITE),
+            "ЧЕРН" | "ЧЁРН" => Some(Color::BLACK),
+            _ => None
+        }
+    }
+
+    fn ru_hex_handler(c: char) -> Option<u8> {
+        match c {
+            '0'..='9' => Some(c as u8 - b'0'),
+            'а'|'А' => Some(10),
+            'б'|'Б' => Some(11),
+            'в'|'В' => Some(12),
+            'г'|'Г' => Some(13),
+            'д'|'Д' => Some(14),
+            'е'|'Е' => Some(15),
+            _ => None
+        }
+    }
+
 
     fn new(r: u8, g: u8, b: u8) -> Self {
         Self { r, g, b }
     }
 
-    fn from_hex(col: &str) -> Self{
+    fn from_hex(col: &str) -> Option<Self>{
         let hex = col.strip_prefix('#').unwrap_or(col);
         let mut digits = hex.chars().map(|c| c.to_digit(16).map(|d| d as u8));
-        Self::from_iterator(&mut digits).unwrap_or(Self::BLACK)
+        Self::from_iterator(&mut digits)
     }
 
-    fn from_ru_hex(col: &str) -> Self {
+    fn from_ru_hex(col: &str) -> Option<Self >{
         let hex = col.strip_prefix(['ц', 'Ц']).unwrap_or(col);
-        let mut digits = hex.chars().map(|c| ru_hex_handler(c));
-        Self::from_iterator(&mut digits).unwrap_or(Self::BLACK)
+        let mut digits = hex.chars().map(|c| Self::ru_hex_handler(c));
+        Self::from_iterator(&mut digits)
     }
 
-    fn from_digits(col: &str) -> Self {
+    fn from_digits(col: &str) -> Option<Self> {
         let mut digits = col.chars().map(|c| c.to_digit(10));
         let mut next_byte = || {
             let val = digits.next()?? * 100 + digits.next()?? * 10 + digits.next()??;
             u8::try_from(val).ok()
         };
         match (next_byte(), next_byte(), next_byte()) {
-            (Some(r), Some(g), Some(b)) => Self {r, g, b},
-            _ => Self::BLACK
+            (Some(r), Some(g), Some(b)) => Some(Self {r, g, b}),
+            _ => None
         }
     }
 
@@ -62,9 +98,10 @@ impl Color {
         Some(Self::new(r, g, b))
     }
 
-    fn from_unknown_string(line: &str) -> Self {
-        if let Some(c) = ru_color_const(line){
-            return c;
+    fn from_unknown_string(line: &str) -> Option<Self> {
+        let cosnt_color = Self::ru_color_const(line);
+        if cosnt_color.is_some(){
+            return cosnt_color;
         } else {
             if line.starts_with('#') {
                 return Self::from_hex(line);
@@ -78,43 +115,7 @@ impl Color {
 
 }
 
-fn ru_color_const(line: &str) -> Option<Color> {
-    match line {
-        "КРАС" => Some(Color::RED),
-        "ОРАН" => Some(Color::ORANGE),
-        "ЖЁЛ" | "ЖЕЛ" => Some(Color::YELLOW),
-        "ЗЕЛ" => Some(Color::GREEN),
-        "ГОЛ" => Some(Color::LIGHT_BLUE),
-        "СИН" => Some(Color::DARK_BLUE),
-        "ФИОЛ" => Some(Color::MAGENTA),
-        "РОЗ" => Some(Color::PINK),
-        "КОР" => Some(Color::BROWN),
-        "ЛИМ" => Some(Color::LEMON),
-        "САЛ" => Some(Color::CHARTREUSE),
-        "БИР" => Some(Color::CYAN),
-        "ЛАЗ" => Some(Color::LAZULI),
-        "ФУК" => Some(Color::FUCHSIA),
-        "БЕЛ" => Some(Color::WHITE),
-        "ЧЕРН" | "ЧЁРН" => Some(Color::BLACK),
-        _ => None
-    }
-}
-
-fn ru_hex_handler(c: char) -> Option<u8> {
-    match c {
-        '0'..='9' => Some(c as u8 - b'0'),
-        'а'|'А' => Some(10),
-        'б'|'Б' => Some(11),
-        'в'|'В' => Some(12),
-        'г'|'Г' => Some(13),
-        'д'|'Д' => Some(14),
-        'е'|'Е' => Some(15),
-         _ => None
-    }
-}
-
-
-fn is_should_be_changed(ch: char) -> bool {
+fn is_should_be_changed_on_name(ch: char) -> bool {
     ch == SHIELD || ch ==MARK || ch == SMALL_YO || ch.is_uppercase()
 }
 
@@ -124,8 +125,6 @@ fn is_inline_marking(ch: char) -> bool {
         MARK | SHIELD | BOLD | ITALIC | STRIKE | UNDER | MONO | COLOR | LBRACE | RBRACE
     )
 }
-
-
 
 #[derive(PartialEq, Debug, Clone, Copy)]
 enum InlineClearKind {
@@ -138,7 +137,7 @@ enum InlineClearKind {
 }
 
 pub(crate) fn clear_name_attribute<'a>(line: &'a str) -> Cow<'a, str> {
-    let Some(first) = line.find(is_should_be_changed) else {
+    let Some(first) = line.find(is_should_be_changed_on_name) else {
         return Cow::Borrowed(line);
     };
 
@@ -157,7 +156,11 @@ pub(crate) fn clear_name_attribute<'a>(line: &'a str) -> Cow<'a, str> {
             out.push(*ch);
         }
     }
-
+    
+    fn push_to_stack(braces_stack: &mut Vec<InlineClearKind>, chars: &mut impl Iterator<Item = char>, what: InlineClearKind){
+        braces_stack.push(what);
+        chars.next();
+    }
 
     while let Some(ch) = chars.next() {
         match ch {
@@ -171,35 +174,18 @@ pub(crate) fn clear_name_attribute<'a>(line: &'a str) -> Cow<'a, str> {
             MARK => {
                 if let Some(next) = chars.peek() {
                     match *next {
-                        BOLD => {
-                            braces_stack.push(InlineClearKind::Bold);
-                            chars.next();
-                        },
-                        ITALIC => {
-                            braces_stack.push(InlineClearKind::Italic);
-                            chars.next();
-                        },
-                        STRIKE => {
-                            braces_stack.push(InlineClearKind::Strike);
-                            chars.next();
-                        },
-                        UNDER => {
-                            braces_stack.push(InlineClearKind::Under);
-                            chars.next();
-                        },
-                        MONO => {
-                            braces_stack.push(InlineClearKind::Mono);
-                            chars.next();
-                        },
+                        BOLD => push_to_stack(&mut braces_stack, &mut chars, InlineClearKind::Bold),
+                        ITALIC => push_to_stack(&mut braces_stack, &mut chars, InlineClearKind::Italic),
+                        STRIKE => push_to_stack(&mut braces_stack, &mut chars, InlineClearKind::Strike),
+                        UNDER => push_to_stack(&mut braces_stack, &mut chars, InlineClearKind::Under),
+                        MONO => push_to_stack(&mut braces_stack, &mut chars, InlineClearKind::Mono),
                         COLOR => {
-                            braces_stack.push(InlineClearKind::Color(depth));
+                            push_to_stack(&mut braces_stack, &mut chars, InlineClearKind::Color(depth));
                             in_color = true;
-                            chars.next();
                         },
                         _ => ()
                     }
                 }
-
             },
             _ => {
                 if in_color { 
@@ -233,15 +219,12 @@ pub(crate) fn clear_name_attribute<'a>(line: &'a str) -> Cow<'a, str> {
                     }
                 }
             }
-
         }
     }
     return Cow::Owned(out);
-
 }
 
-
-fn clear_name_link<'a>(line: &'a str) -> Cow<'a, str> {
+pub(crate) fn clear_name_link<'a>(line: &'a str) -> Cow<'a, str> {
     let Some(first) = line.bytes().position(|b| b == BYTE_SHIELD) else {
         return Cow::Borrowed(line);
     };
@@ -265,14 +248,7 @@ fn clear_name_link<'a>(line: &'a str) -> Cow<'a, str> {
 }
 
 
-struct Style{
-    bold: bool,
-    italic: bool,
-    mono: bool,
-    under: bool,
-    strike: bool,
-    color: Color
-}
+
 
 #[derive(Debug, PartialEq)]
 enum Mark<'a> {
@@ -281,7 +257,7 @@ enum Mark<'a> {
     Strike,
     Under,
     Mono,
-    Color(Color, u32),
+    Color(Option<Color>, u32),
     Link(&'a str, u32)
 }
 
@@ -302,9 +278,9 @@ struct Range<'a> {
 #[derive(Debug, PartialEq)]
 enum InlineText<'a> {
     String(&'a str),
-    InnerLink(&'a str, RefKind),
+    InnerLink(Cow<'a, str>, RefKind),
     Note(u16),
-    Empty
+    Space
 }
 
 #[derive(Debug, PartialEq)]
@@ -314,17 +290,71 @@ struct PreparsedLines<'a> {
 }
 
 impl<'a> PreparsedLines<'a> {
-    fn try_pop_stack(open_stack: &mut Vec<Opened<'a>>, is_target: impl Fn(&Opened) -> bool) -> Option<Opened<'a>>{
+    fn try_pop_stack(
+        open_stack: &mut Vec<Opened<'a>>,
+        is_target: impl Fn(&Opened) -> bool
+    ) -> Option<Opened<'a>>{
         let pos = open_stack.iter().rposition(is_target)?;
         let target = open_stack.remove(pos);
         open_stack.truncate(pos);
         return Some(target);
     }
 
-    fn push_range_to_out (out: &mut Self, line: &'a str, start:usize, end: usize) {
+    fn push_range_to_out (
+        out: &mut Self, 
+        line: &'a str, 
+        start:usize, 
+        end: usize
+    ) {
         if start < end {
              out.text.push(InlineText::String(&line[start..end])); 
         }
+    }
+
+    fn char_to_mark(ch: char) -> Option<Mark<'a>> {
+        match ch {
+            BOLD => Some(Mark::Bold),
+            ITALIC => Some(Mark::Italic),
+            STRIKE => Some(Mark::Strike), 
+            UNDER => Some(Mark::Under),
+            MONO => Some(Mark::Mono),
+            _ => None
+        }
+    }
+
+    fn brace_char_to_mark(line: &'a str, ch: char, brace_depth: u32) -> Mark<'a> {
+        let line = &line[ch.len_utf8()..];
+        match ch {
+            COLOR => {
+                let color = Color::from_unknown_string(line);
+                Mark::Color(color, brace_depth)
+            },
+            LINK => Mark::Link(line, brace_depth),
+            _ => unreachable!("only color an links can be here!")
+        }
+    }
+    
+    /// Finds the bracket that closes the name of an inner link `\*р(...)`, considering nesting and escaping.
+    /// `start` - first byte after the opening bracket. If the bracket is not closed, the name runs to the end of the line.
+    fn find_link_end(line: &str, start: usize) -> usize {
+        let mut depth: u32 = 1;
+        let mut chars = line[start..].char_indices().peekable();
+        while let Some((j, ch)) = chars.next() {
+            match ch {
+                SHIELD => {
+                    chars.next_if(|&(_, c)| is_inline_marking(c));
+                },
+                LBRACE => depth += 1,
+                RBRACE => {
+                    depth -= 1;
+                    if depth == 0 {
+                        return start + j;
+                    }
+                },
+                _ => ()
+            }
+        }
+        line.len()
     }
 
     fn new(lines: Vec<&'a str>) -> Self {
@@ -341,47 +371,16 @@ impl<'a> PreparsedLines<'a> {
                 println!("{}, {}", i, ch);
                 match ch {    
                     MARK => {
-                        if let Some((next_i, next_ch)) = chars.peek() {
-                            match *next_ch {
-                                BOLD => {
-                                    Self::push_range_to_out(&mut out, line, byte_after_last_tag, i);
-                                    byte_after_last_tag = next_i + next_ch.len_utf8();
-                                    open_stack.push(Opened { mark: Mark::Bold, start: out.text.len()});
-                                    chars.next();
-                                },
-                                ITALIC => {
-                                    Self::push_range_to_out(&mut out, line, byte_after_last_tag, i);
-                                    byte_after_last_tag = next_i + next_ch.len_utf8();
-                                    open_stack.push(Opened { mark: Mark::Italic, start: out.text.len()});
-                                    chars.next();
-                                },
-                                STRIKE => {
-                                    Self::push_range_to_out(&mut out, line, byte_after_last_tag, i);
-                                    byte_after_last_tag = next_i + next_ch.len_utf8();
-                                    open_stack.push(Opened { mark: Mark::Strike, start: out.text.len()});
-                                    chars.next();
-                                },
-                                UNDER => {
-                                    Self::push_range_to_out(&mut out, line, byte_after_last_tag, i);
-                                    byte_after_last_tag = next_i + next_ch.len_utf8();
-                                    open_stack.push(Opened { mark: Mark::Under, start: out.text.len()});
-                                    chars.next();
-                                },
-                                MONO => {
-                                    Self::push_range_to_out(&mut out, line, byte_after_last_tag, i);
-                                    byte_after_last_tag = next_i + next_ch.len_utf8();
-                                    open_stack.push(Opened { mark: Mark::Mono, start: out.text.len()});
-                                    chars.next();
-                                },
-                                COLOR => {
-                                    let param_start = *next_i + COLOR.len_utf8();
+                        if let Some(&(next_i, next_ch)) = chars.peek() {
+                            match next_ch {
+                                COLOR | LINK => {
                                     match chars.find(|&(_, c)| c == LBRACE) {
                                         Some((brace_i, i_ch)) => {
                                             Self::push_range_to_out(&mut out, line, byte_after_last_tag, i);
-                                            let color = Color::from_unknown_string(&line[param_start..brace_i]);
+                                            let mark = Self::brace_char_to_mark(&line[next_i..brace_i], next_ch, brace_depth);
                                             byte_after_last_tag = brace_i + i_ch.len_utf8();
                                             open_stack.push(
-                                                Opened { mark: Mark::Color(color, brace_depth), start: out.text.len()}
+                                                Opened { mark, start: out.text.len()}
                                             );
                                             brace_depth += 1;
                                         }
@@ -394,9 +393,15 @@ impl<'a> PreparsedLines<'a> {
                                 NOTE => {
                                     chars.next();
                                     Self::push_range_to_out(&mut out, line, byte_after_last_tag, i);
-                                    if let Some(&(l_i, l_c)) = chars.peek() && let Some(kind) = ref_kind(l_c) && line[l_i + l_c.len_utf8()..].starts_with(LBRACE){
-                                        chars.next();
-                                        chars.next();
+                                    if let Some(&(l_i, l_c)) = chars.peek() && 
+                                       let Some(kind) = ref_kind(l_c) && line[l_i + l_c.len_utf8()..].starts_with(LBRACE)
+                                    {
+                                        let name_start = l_i + l_c.len_utf8() + LBRACE.len_utf8();
+                                        let name_end = Self::find_link_end(line, name_start);
+                                        while chars.next_if(|&(j, _)| j <= name_end).is_some() {}
+                                        let name = clear_name_attribute(&line[name_start..name_end]);
+                                        out.text.push(InlineText::InnerLink(name, kind));
+                                        byte_after_last_tag = (name_end + RBRACE.len_utf8()).min(line.len());
                                     } else if let Some((start, _)) = chars.next_if(|&(_, c)| c.is_ascii_digit()) {
                                         let mut end = start + 1;
                                         while let Some(_) = chars.next_if(|&(_, c)| c.is_ascii_digit()){
@@ -410,32 +415,19 @@ impl<'a> PreparsedLines<'a> {
                                             byte_after_last_tag = end;
                                         }
                                     } else {
-                                        chars.next();
-                                        chars.next();
                                         byte_after_last_tag = i + MARK.len_utf8() + NOTE.len_utf8();
                                     }
                                 }
-                                LINK => {
-                                    let param_start = *next_i + LINK.len_utf8();
-                                    match chars.find(|&(_, c)| c == LBRACE) {
-                                        Some((brace_i, i_ch)) => {
-                                            Self::push_range_to_out(&mut out, line, byte_after_last_tag, i);
-                                            let ref_link = &line[param_start..brace_i];
-                                            byte_after_last_tag = brace_i + i_ch.len_utf8();
-                                            open_stack.push(
-                                                Opened { mark: Mark::Link(ref_link, brace_depth), start: out.text.len()}
-                                            );
-                                            brace_depth += 1;
-                                        }
-                                        None => {
-                                            Self::push_range_to_out(&mut out, line, byte_after_last_tag, i);
-                                            byte_after_last_tag = line.len();
-                                        }
-                                    }
-                                }
                                 _ => {
-                                    Self::push_range_to_out(&mut out, line, byte_after_last_tag, i);
-                                    byte_after_last_tag = i + ch.len_utf8();
+                                    if let Some(mark) = Self::char_to_mark(next_ch) {
+                                        Self::push_range_to_out(&mut out, line, byte_after_last_tag, i);
+                                        byte_after_last_tag = next_i + next_ch.len_utf8();
+                                        open_stack.push(Opened { mark, start: out.text.len()});
+                                        chars.next();
+                                    } else {
+                                        Self::push_range_to_out(&mut out, line, byte_after_last_tag, i);
+                                        byte_after_last_tag = i + ch.len_utf8();
+                                    }
                                 }
                             }
                         }
@@ -446,51 +438,6 @@ impl<'a> PreparsedLines<'a> {
                             byte_after_last_tag = i + SHIELD.len_utf8();
                         }
                     }
-                    BOLD => {
-                        if let Some(opened) = Self::try_pop_stack(&mut open_stack, |t| t.mark == Mark::Bold){
-                            Self::push_range_to_out(&mut out, line, byte_after_last_tag, i);
-                            byte_after_last_tag = i + ch.len_utf8();
-                            out.style_ranges.push(
-                                Range { mark: Mark::Bold, start: opened.start, end: out.text.len() }
-                            );
-                        }
-                    },
-                    ITALIC => {
-                        if let Some(opened) = Self::try_pop_stack(&mut open_stack, |t| t.mark == Mark::Italic){
-                            Self::push_range_to_out(&mut out, line, byte_after_last_tag, i);
-                            byte_after_last_tag = i + ch.len_utf8();
-                            out.style_ranges.push(
-                                Range { mark: Mark::Italic, start: opened.start, end: out.text.len() }
-                            );
-                        }
-                    },
-                    STRIKE => {
-                        if let Some(opened) = Self::try_pop_stack(&mut open_stack, |t| t.mark == Mark::Strike){
-                            Self::push_range_to_out(&mut out, line, byte_after_last_tag, i);
-                            byte_after_last_tag = i + ch.len_utf8();
-                            out.style_ranges.push(
-                                Range { mark: Mark::Strike, start: opened.start, end: out.text.len() }
-                            );
-                        }
-                    },
-                    UNDER => {
-                        if let Some(opened) = Self::try_pop_stack(&mut open_stack, |t| t.mark == Mark::Under){
-                            Self::push_range_to_out(&mut out, line, byte_after_last_tag, i);
-                            byte_after_last_tag = i + ch.len_utf8();
-                            out.style_ranges.push(
-                                Range { mark: Mark::Under, start: opened.start, end: out.text.len() }
-                            );
-                        }
-                    },
-                    MONO => {
-                        if let Some(opened) = Self::try_pop_stack(&mut open_stack, |t| t.mark == Mark::Mono){
-                            Self::push_range_to_out(&mut out, line, byte_after_last_tag, i);
-                            byte_after_last_tag = i + ch.len_utf8();
-                            out.style_ranges.push(
-                                Range { mark: Mark::Mono, start: opened.start, end: out.text.len() }
-                            );
-                        }
-                    },
                     LBRACE => {
                         brace_depth = brace_depth.saturating_add(1);
                     },
@@ -508,14 +455,24 @@ impl<'a> PreparsedLines<'a> {
                         }
                     },
                     _ => {
+                        if let Some(mark) = Self::char_to_mark(ch) {
+                            if let Some(opened) = Self::try_pop_stack(&mut open_stack, |t| t.mark == mark){ 
+                                Self::push_range_to_out(&mut out, line, byte_after_last_tag, i);
+                                byte_after_last_tag = i + ch.len_utf8();
+                                out.style_ranges.push(
+                                    Range { mark, start: opened.start, end: out.text.len() }
+                                );
+                            }
+                        }
                     }
                 }
-                println!("out: {:?},   open_stack: {:?},  close_stac: {:?},     bs:{:?}", out.text, open_stack, out.style_ranges, byte_after_last_tag);
+                
             }
             Self::push_range_to_out(&mut out, line, byte_after_last_tag, line.len());
             for open in open_stack.into_iter().rev() {
                 out.style_ranges.push(Range { mark: open.mark, start: open.start, end: out.text.len()});
             }
+            out.text.push(InlineText::Space);
         }
 
         out
@@ -524,10 +481,145 @@ impl<'a> PreparsedLines<'a> {
 
 
 
+#[derive(Debug, Default, Clone)]
+struct StyleDiff {
+    bold: i32,
+    italic: i32,
+    mono: i32,
+    strike: i32,
+    under: i32,
+}
+impl StyleDiff {
+    fn is_zero(&self) -> bool {
+        self.bold == 0 &&
+        self.italic == 0 &&
+        self.mono == 0 &&
+        self.strike == 0 &&
+        self.under == 0
+    }
+
+    fn to_style(&self) -> Style {
+        Style {
+            is_bold: self.bold > 0,
+            is_italic: self.italic > 0,
+            is_mono: self.mono > 0,
+            is_strike: self.strike > 0,
+            is_under: self.under > 0
+        }
+    }
+}
+
+impl Add for StyleDiff {
+    type Output = Self;
+    fn add(self, rhs: Self) -> Self::Output {
+        Self::Output {
+            bold: self.bold + rhs.bold,
+            italic: self.italic + rhs.italic,
+            mono: self.mono + rhs.mono,
+            under: self.bold + rhs.bold,
+            strike: self.strike + rhs.strike
+        }
+    }
+}
+
+impl AddAssign for StyleDiff {
+    fn add_assign(&mut self, rhs: Self) {
+        self.bold += rhs.bold;
+        self.italic += rhs.italic;
+        self.mono += rhs.mono;
+        self.bold += rhs.bold;
+        self.strike += rhs.strike;
+    }
+}
+
+#[derive(Debug)]
+struct Style {
+    is_bold: bool,
+    is_italic: bool,
+    is_mono: bool,
+    is_strike: bool,
+    is_under: bool,
+}
+impl PartialEq for Style {
+    fn eq(&self, other: &Self) -> bool {
+        self.is_bold == other.is_bold &&
+        self.is_italic == other.is_italic &&
+        self.is_mono == other.is_mono &&
+        self.is_strike == other.is_strike &&
+        self.is_under == other.is_under
+    }   
+}
+
+
+#[derive(Debug)]
+struct Span<'a> {
+    text: Vec<InlineText<'a>>,
+    style: Style
+}
+impl<'a> Span<'a>{
+    fn new(text: Vec<InlineText<'a>>, style: Style) -> Self {
+        Self {text, style}
+    }
+
+    fn push(&mut self, line: InlineText<'a>) {
+        self.text.push(line);
+    }
+}
 
 
 
 
+fn generate_spans<'a>(preparsed: PreparsedLines<'a>) -> Vec<Span<'a>> {
+
+    
+
+    let mut difs: Vec<StyleDiff> = vec![StyleDiff::default(); preparsed.text.len()];
+    
+    for range in preparsed.style_ranges {
+        match range.mark {
+            Mark::Bold => {
+                difs[range.start].bold += 1;
+                difs[range.end].bold -= 1;
+            },
+            Mark::Italic => {
+                difs[range.start].italic += 1;
+                difs[range.end].italic -= 1;
+            },
+            Mark::Mono => {
+                difs[range.start].mono += 1;
+                difs[range.end].mono -= 1;
+            },
+            Mark::Strike => {
+                difs[range.start].strike += 1;
+                difs[range.end].strike -= 1;
+            },
+            Mark::Under => {
+                difs[range.start].under += 1;
+                difs[range.end].under -= 1;
+            },
+            _ => {
+
+            }
+        }
+    }
+
+    let mut out:Vec<Span> = Vec::new();
+    let mut counter = StyleDiff::default();
+    for (text, delta) in preparsed.text.into_iter().zip(difs){
+        counter += delta;
+        if let Some(last) = out.last_mut() && counter.to_style() == last.style{
+            last.push(text);
+        } else {
+            out.push(
+                Span::new(vec![text], counter.to_style())
+            );
+        }
+    }
+
+    println!("out is {:?}", out);
+
+    return out;
+}
 
 
 
@@ -542,12 +634,78 @@ impl<'a> PreparsedLines<'a> {
 
     #[test]
     fn main() {
-        let out = PreparsedLines::new(vec!["три\\%КРАС(\\,https://google.com/email=?(гугл))"]);
+        let out = PreparsedLines::new(vec!["aa\\: bb\\cc:ee"]);
+
         println!();
         println!("---RESULT---");
-        println!("{out:?}")
+        println!("{out:?}");
+        println!();
+
+
+        println!("---RESULT 2---");
+        generate_spans(out);
+        println!();
     }
 
+
+    #[test]
+    fn check_line_preparsed_inner_link() {
+        let out = PreparsedLines::new(vec!["раз\\*р(ЖОПА) раз"]);
+        let expected = PreparsedLines {
+            text: vec![
+                InlineText::String("раз"),
+                InlineText::InnerLink(Cow::Borrowed("жопа"), RefKind::Image),
+                InlineText::String(" раз")
+            ],
+            style_ranges: vec![]
+        };
+        assert_eq!(out, expected);
+
+        let out = PreparsedLines::new(vec!["см. \\*л(\\:Пример: Кода)"]);
+        let expected = PreparsedLines {
+            text: vec![
+                InlineText::String("см. "),
+                InlineText::InnerLink(Cow::Borrowed("пример кода"), RefKind::Code),
+            ],
+            style_ranges: vec![]
+        };
+        assert_eq!(out, expected);
+
+        let out = PreparsedLines::new(vec!["\\*ф(F(x) и y_))!"]);
+        let expected = PreparsedLines {
+            text: vec![
+                InlineText::InnerLink(Cow::Borrowed("f(x) и y)"), RefKind::Formula),
+                InlineText::String("!"),
+            ],
+            style_ranges: vec![]
+        };
+        assert_eq!(out, expected);
+
+        let out = PreparsedLines::new(vec!["\\*т(\\%КРАС(Ёлка))"]);
+        let expected = PreparsedLines {
+            text: vec![InlineText::InnerLink(Cow::Borrowed("елка"), RefKind::Table)],
+            style_ranges: vec![]
+        };
+        assert_eq!(out, expected);
+
+        let out = PreparsedLines::new(vec!["\\*т(Таблица"]);
+        let expected = PreparsedLines {
+            text: vec![InlineText::InnerLink(Cow::Borrowed("таблица"), RefKind::Table)],
+            style_ranges: vec![]
+        };
+        assert_eq!(out, expected);
+
+        let out = PreparsedLines::new(vec!["\\:а \\*р(Б) в:"]);
+        let expected = PreparsedLines {
+            text: vec![
+                InlineText::String("а "),
+                InlineText::InnerLink(Cow::Borrowed("б"), RefKind::Image),
+                InlineText::String(" в"),
+            ],
+            style_ranges: vec![Range{mark: Mark::Bold, start: 0, end: 3}]
+        };
+        assert_eq!(out, expected);
+    }
 
     #[test]
     fn check_line_preparsed_line_common() {
