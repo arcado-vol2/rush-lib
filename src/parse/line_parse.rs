@@ -70,14 +70,12 @@ impl Color {
 
     fn from_hex(col: &str) -> Option<Self>{
         let hex = col.strip_prefix('#').unwrap_or(col);
-        let mut digits = hex.chars().map(|c| c.to_digit(16).map(|d| d as u8));
-        Self::from_iterator(&mut digits)
+        Self::from_iterator( hex.chars().map(|c| c.to_digit(16).map(|d| d as u8)))
     }
 
     fn from_ru_hex(col: &str) -> Option<Self >{
         let hex = col.strip_prefix(['ц', 'Ц']).unwrap_or(col);
-        let mut digits = hex.chars().map(|c| Self::ru_hex_handler(c));
-        Self::from_iterator(&mut digits)
+        Self::from_iterator(hex.chars().map(|c| Self::ru_hex_handler(c)))
     }
 
     fn from_digits(col: &str) -> Option<Self> {
@@ -87,15 +85,25 @@ impl Color {
             u8::try_from(val).ok()
         };
         match (next_byte(), next_byte(), next_byte()) {
-            (Some(r), Some(g), Some(b)) => Some(Self {r, g, b}),
+            (Some(r), Some(g), Some(b)) => {
+                if digits.next().is_none() {
+                    return  Some(Self {r, g, b});
+                }
+                None
+            },
             _ => None
         }
     }
 
-    fn from_iterator(digits: &mut impl Iterator<Item = Option<u8>>) -> Option<Self> {
+    fn from_iterator(mut digits: impl Iterator<Item = Option<u8>>) -> Option<Self> {
         let mut next_byte = || Some(digits.next()?? * 16 + digits.next()??);
         let (r, g, b) = (next_byte()?, next_byte()?, next_byte()?);
-        Some(Self::new(r, g, b))
+        if digits.next().is_none(){
+            return  Some(Self::new(r, g, b));
+        } else {
+            return None;
+        }
+        
     }
 
     fn from_unknown_string(line: &str) -> Option<Self> {
