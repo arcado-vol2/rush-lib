@@ -1,10 +1,10 @@
 use std::borrow::Cow;
-use std::ops::{Add, AddAssign};
+use std::ops::AddAssign;
 
 use crate::parse::lexemas::{BOLD, BYTE_SHIELD, COLOR, ITALIC, LBRACE, LINK, MARK, MONO, NOTE, RBRACE, RefKind, SHIELD, SMALL_E, SMALL_YO, SPACE, STRIKE, UNDER, ref_kind};
 
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Default, Clone)]
 struct Color {
     r: u8,
     g: u8,
@@ -257,8 +257,8 @@ enum Mark<'a> {
     Strike,
     Under,
     Mono,
-    Color(Option<Color>, u32),
-    Link(&'a str, u32)
+    Color(Option<Color>),
+    Link(&'a str)
 }
 
 
@@ -266,6 +266,7 @@ enum Mark<'a> {
 struct Opened<'a> {
     mark: Mark<'a>,
     start: usize,
+    brace_depth: Option<u32>,
 }
 
 #[derive(Debug, PartialEq)]
@@ -322,20 +323,18 @@ impl<'a> PreparsedLines<'a> {
         }
     }
 
-    fn brace_char_to_mark(line: &'a str, ch: char, brace_depth: u32) -> Mark<'a> {
+    fn brace_char_to_mark(line: &'a str, ch: char) -> Mark<'a> {
         let line = &line[ch.len_utf8()..];
         match ch {
             COLOR => {
                 let color = Color::from_unknown_string(line);
-                Mark::Color(color, brace_depth)
+                Mark::Color(color)
             },
-            LINK => Mark::Link(line, brace_depth),
+            LINK => Mark::Link(line),
             _ => unreachable!("only color an links can be here!")
         }
     }
-    
-    /// Finds the bracket that closes the name of an inner link `\*р(...)`, considering nesting and escaping.
-    /// `start` - first byte after the opening bracket. If the bracket is not closed, the name runs to the end of the line.
+
     fn find_link_end(line: &str, start: usize) -> usize {
         let mut depth: u32 = 1;
         let mut chars = line[start..].char_indices().peekable();
@@ -358,6 +357,7 @@ impl<'a> PreparsedLines<'a> {
     }
 
     fn new(lines: Vec<&'a str>) -> Self {
+        println!("PARSING: {:?}", lines);
         let mut out = Self {
             text: Vec::new(),
             style_ranges: Vec::new()
@@ -377,10 +377,10 @@ impl<'a> PreparsedLines<'a> {
                                     match chars.find(|&(_, c)| c == LBRACE) {
                                         Some((brace_i, i_ch)) => {
                                             Self::push_range_to_out(&mut out, line, byte_after_last_tag, i);
-                                            let mark = Self::brace_char_to_mark(&line[next_i..brace_i], next_ch, brace_depth);
+                                            let mark = Self::brace_char_to_mark(&line[next_i..brace_i], next_ch);
                                             byte_after_last_tag = brace_i + i_ch.len_utf8();
                                             open_stack.push(
-                                                Opened { mark, start: out.text.len()}
+                                                Opened { mark, start: out.text.len(), brace_depth: Some(brace_depth)}
                                             );
                                             brace_depth += 1;
                                         }
@@ -422,7 +422,7 @@ impl<'a> PreparsedLines<'a> {
                                     if let Some(mark) = Self::char_to_mark(next_ch) {
                                         Self::push_range_to_out(&mut out, line, byte_after_last_tag, i);
                                         byte_after_last_tag = next_i + next_ch.len_utf8();
-                                        open_stack.push(Opened { mark, start: out.text.len()});
+                                        open_stack.push(Opened { mark, start: out.text.len(), brace_depth: None});
                                         chars.next();
                                     } else {
                                         Self::push_range_to_out(&mut out, line, byte_after_last_tag, i);
@@ -444,7 +444,7 @@ impl<'a> PreparsedLines<'a> {
                     RBRACE => {
                         brace_depth = brace_depth.saturating_sub(1);
                         if let Some(opened) = Self::try_pop_stack(
-                            &mut open_stack, |t| matches!(t.mark, Mark::Color(_, d) | Mark::Link(_, d) if d == brace_depth)
+                            &mut open_stack, |t| t.brace_depth == Some(brace_depth)
                         ) {
                             println!("Depth is zero also color in stack: {opened:?}");
                             Self::push_range_to_out(&mut out, line, byte_after_last_tag, i);
@@ -473,6 +473,7 @@ impl<'a> PreparsedLines<'a> {
                 out.style_ranges.push(Range { mark: open.mark, start: open.start, end: out.text.len()});
             }
             out.text.push(InlineText::Space);
+            
         }
 
         out
@@ -482,82 +483,75 @@ impl<'a> PreparsedLines<'a> {
 
 
 #[derive(Debug, Default, Clone)]
-struct StyleDiff {
+struct StyleDiff<'a> {
     bold: i32,
     italic: i32,
     mono: i32,
     strike: i32,
     under: i32,
+    color_open: i32,
+    color_close: i32,
+    color: Option<Color>,
+    link_open: i32,
+    link_close: i32,
+    link: Option<&'a str>
+    
 }
-impl StyleDiff {
-    fn is_zero(&self) -> bool {
-        self.bold == 0 &&
-        self.italic == 0 &&
-        self.mono == 0 &&
-        self.strike == 0 &&
-        self.under == 0
-    }
-
-    fn to_style(&self) -> Style {
+impl<'a> StyleDiff<'a> {
+    fn to_style(&self) -> Style<'a> {
         Style {
             is_bold: self.bold > 0,
             is_italic: self.italic > 0,
             is_mono: self.mono > 0,
             is_strike: self.strike > 0,
-            is_under: self.under > 0
+            is_under: self.under > 0,
+            color: self.color.clone(),
+            link: self.link.clone(),
         }
     }
 }
 
-impl Add for StyleDiff {
-    type Output = Self;
-    fn add(self, rhs: Self) -> Self::Output {
-        Self::Output {
-            bold: self.bold + rhs.bold,
-            italic: self.italic + rhs.italic,
-            mono: self.mono + rhs.mono,
-            under: self.bold + rhs.bold,
-            strike: self.strike + rhs.strike
-        }
-    }
-}
-
-impl AddAssign for StyleDiff {
+impl<'a> AddAssign for StyleDiff<'a> {
     fn add_assign(&mut self, rhs: Self) {
         self.bold += rhs.bold;
         self.italic += rhs.italic;
         self.mono += rhs.mono;
-        self.bold += rhs.bold;
+        self.under += rhs.under;
         self.strike += rhs.strike;
+
+        self.color_open -= rhs.color_close;
+        if self.color_open <= 0 {
+            self.color = rhs.color;
+        }
+        self.color_open += rhs.color_open;
+
+        self.link_open -= rhs.link_close;
+        if self.link_open <= 0 {
+            self.link = rhs.link;
+        }
+        self.link_open += rhs.link_open
     }
 }
 
-#[derive(Debug)]
-struct Style {
+#[derive(Debug, PartialEq)]
+struct Style<'a> {
     is_bold: bool,
     is_italic: bool,
     is_mono: bool,
     is_strike: bool,
     is_under: bool,
-}
-impl PartialEq for Style {
-    fn eq(&self, other: &Self) -> bool {
-        self.is_bold == other.is_bold &&
-        self.is_italic == other.is_italic &&
-        self.is_mono == other.is_mono &&
-        self.is_strike == other.is_strike &&
-        self.is_under == other.is_under
-    }   
+    color: Option<Color>,
+    link: Option<&'a str>
 }
 
 
 #[derive(Debug)]
 struct Span<'a> {
     text: Vec<InlineText<'a>>,
-    style: Style
+    style: Style<'a>
 }
 impl<'a> Span<'a>{
-    fn new(text: Vec<InlineText<'a>>, style: Style) -> Self {
+    fn new(text: Vec<InlineText<'a>>, style: Style<'a>) -> Self {
         Self {text, style}
     }
 
@@ -570,7 +564,9 @@ impl<'a> Span<'a>{
 
 
 fn generate_spans<'a>(preparsed: PreparsedLines<'a>) -> Vec<Span<'a>> {
-
+    println!("Generate_spans:");
+    println!("{:?}", preparsed);
+    println!();
     
 
     let mut difs: Vec<StyleDiff> = vec![StyleDiff::default(); preparsed.text.len()];
@@ -597,23 +593,52 @@ fn generate_spans<'a>(preparsed: PreparsedLines<'a>) -> Vec<Span<'a>> {
                 difs[range.start].under += 1;
                 difs[range.end].under -= 1;
             },
-            _ => {
-
-            }
+            Mark::Color(color) if range.start < range.end => {
+                difs[range.start].color_open += 1;
+                difs[range.start].color = color;
+                difs[range.end].color_close += 1;
+            },
+            Mark::Link(link) if range.start < range.end => {
+                difs[range.start].link_open += 1;
+                difs[range.start].link = Some(link);
+                difs[range.end].link_close += 1;
+            },
+            _ => ()
         }
     }
 
     let mut out:Vec<Span> = Vec::new();
     let mut counter = StyleDiff::default();
-    for (text, delta) in preparsed.text.into_iter().zip(difs){
-        counter += delta;
-        if let Some(last) = out.last_mut() && counter.to_style() == last.style{
-            last.push(text);
+    let mut items = preparsed.text.into_iter().zip(difs).peekable();
+    while let Some((text, delta)) = items.next() {
+        if let Some(last) = out.last_mut() {
+            match text {
+                InlineText::Space => {
+                    if let Some(next_style) = items.peek().map(|(_, d)| d) {
+                        let next_style = next_style.to_style();
+                        if counter.to_style() == next_style {
+                            last.push(text);
+                        } else {
+                            counter += delta;
+                            out.push(Span::new(vec![text], counter.to_style()));
+                        }
+                    }
+                },
+                _ => {
+                    counter += delta;
+                    if counter.to_style() == last.style{
+                        last.push(text);
+                    } else {
+                        out.push(Span::new(vec![text], counter.to_style()));
+                    }
+                }
+            }
         } else {
-            out.push(
-                Span::new(vec![text], counter.to_style())
-            );
+            counter += delta;
+            out.push(Span::new(vec![text], counter.to_style()));
         }
+        
+        
     }
 
     println!("out is {:?}", out);
@@ -628,205 +653,311 @@ fn generate_spans<'a>(preparsed: PreparsedLines<'a>) -> Vec<Span<'a>> {
 
     use crate::parse::line_parse::*;
 
+    #[test]
+    fn main() {
+        
+        let out = PreparsedLines::new(vec!["строка 1", "строка 2"]);
+        println!("---RES 1--");
+        println!("{out:?}");
+        println!();
+        let out = generate_spans(out);
+        println!("---RES 2---");
+        println!("{out:?}");
+    }
+
     fn check(input: &str, expected: &str) {
         assert_eq!(clear_name_attribute(input), expected);
     }
 
-    #[test]
-    fn main() {
-        let out = PreparsedLines::new(vec!["aa\\: bb\\cc:ee"]);
+    use super::InlineText::{Note, Space};
 
-        println!();
-        println!("---RESULT---");
-        println!("{out:?}");
-        println!();
-
-
-        println!("---RESULT 2---");
-        generate_spans(out);
-        println!();
+    fn s(text: &str) -> InlineText<'_> {
+        InlineText::String(text)
     }
 
+    fn inner(name: &str, kind: RefKind) -> InlineText<'_> {
+        InlineText::InnerLink(Cow::Borrowed(name), kind)
+    }
+
+    fn r(mark: Mark<'_>, start: usize, end: usize) -> Range<'_> {
+        Range { mark, start, end }
+    }
+
+    fn red() -> Option<Color> { Some(Color::RED) }
+    fn blue() -> Option<Color> { Some(Color::DARK_BLUE) }
+
+    fn check_pre<'a>(lines: Vec<&'a str>, text: Vec<InlineText<'a>>, style_ranges: Vec<Range<'a>>) {
+        let out = PreparsedLines::new(lines.clone());
+        assert_eq!(out, PreparsedLines { text, style_ranges }, "вход: {lines:?}");
+    }
+
+    fn check_color(param: &str, color: Option<Color>) {
+        let line = format!("\\%{param}(x)");
+        check_pre(vec![&line], vec![s("x"), Space], vec![r(Mark::Color(color), 0, 1)]);
+    }
+
+    fn plain() -> Style<'static> {
+        Style {
+            is_bold: false, is_italic: false, is_mono: false, is_strike: false, is_under: false,
+            color: None, link: None
+        }
+    }
+
+    fn bold() -> Style<'static> {
+        Style { is_bold: true, ..plain() }
+    }
+
+    fn check_spans<'a>(lines: Vec<&'a str>, expected: Vec<(Vec<InlineText<'a>>, Style<'a>)>) {
+        let out: Vec<_> = generate_spans(PreparsedLines::new(lines.clone()))
+            .into_iter()
+            .map(|span| (span.text, span.style))
+            .collect();
+        assert_eq!(out, expected, "input (left - out, right - expected): {lines:?}");
+    }
+
+    // ===== PreparsedLines =====
 
     #[test]
     fn check_line_preparsed_inner_link() {
-        let out = PreparsedLines::new(vec!["раз\\*р(ЖОПА) раз"]);
-        let expected = PreparsedLines {
-            text: vec![
-                InlineText::String("раз"),
-                InlineText::InnerLink(Cow::Borrowed("жопа"), RefKind::Image),
-                InlineText::String(" раз")
-            ],
-            style_ranges: vec![]
-        };
-        assert_eq!(out, expected);
+        check_pre(vec!["раз\\*р(ЖОПА) раз"], vec![s("раз"), inner("жопа", RefKind::Image), s(" раз"), Space], vec![]);
+        check_pre(vec!["см. \\*л(\\:Пример: Кода)"], vec![s("см. "), inner("пример кода", RefKind::Code), Space], vec![]);
+        check_pre(vec!["\\*ф(F(x) и y_))!"], vec![inner("f(x) и y)", RefKind::Formula), s("!"), Space], vec![]);
+        check_pre(vec!["\\*т(\\%КРАС(Ёлка))"], vec![inner("елка", RefKind::Table), Space], vec![]);
+        check_pre(vec!["\\*т(Таблица"], vec![inner("таблица", RefKind::Table), Space], vec![]);
+        check_pre(
+            vec!["\\:а \\*р(Б) в:"],
+            vec![s("а "), inner("б", RefKind::Image), s(" в"), Space],
+            vec![r(Mark::Bold, 0, 3)]
+        );
+        check_pre(vec!["\\*р(Схема (вариант 2))"], vec![inner("схема (вариант 2)", RefKind::Image), Space], vec![]);
+        check_pre(vec!["\\*р(Шаг 1_) настройка)"], vec![inner("шаг 1) настройка", RefKind::Image), Space], vec![]);
+    }
 
-        let out = PreparsedLines::new(vec!["см. \\*л(\\:Пример: Кода)"]);
-        let expected = PreparsedLines {
-            text: vec![
-                InlineText::String("см. "),
-                InlineText::InnerLink(Cow::Borrowed("пример кода"), RefKind::Code),
-            ],
-            style_ranges: vec![]
-        };
-        assert_eq!(out, expected);
-
-        let out = PreparsedLines::new(vec!["\\*ф(F(x) и y_))!"]);
-        let expected = PreparsedLines {
-            text: vec![
-                InlineText::InnerLink(Cow::Borrowed("f(x) и y)"), RefKind::Formula),
-                InlineText::String("!"),
-            ],
-            style_ranges: vec![]
-        };
-        assert_eq!(out, expected);
-
-        let out = PreparsedLines::new(vec!["\\*т(\\%КРАС(Ёлка))"]);
-        let expected = PreparsedLines {
-            text: vec![InlineText::InnerLink(Cow::Borrowed("елка"), RefKind::Table)],
-            style_ranges: vec![]
-        };
-        assert_eq!(out, expected);
-
-        let out = PreparsedLines::new(vec!["\\*т(Таблица"]);
-        let expected = PreparsedLines {
-            text: vec![InlineText::InnerLink(Cow::Borrowed("таблица"), RefKind::Table)],
-            style_ranges: vec![]
-        };
-        assert_eq!(out, expected);
-
-        let out = PreparsedLines::new(vec!["\\:а \\*р(Б) в:"]);
-        let expected = PreparsedLines {
-            text: vec![
-                InlineText::String("а "),
-                InlineText::InnerLink(Cow::Borrowed("б"), RefKind::Image),
-                InlineText::String(" в"),
-            ],
-            style_ranges: vec![Range{mark: Mark::Bold, start: 0, end: 3}]
-        };
-        assert_eq!(out, expected);
+    #[test]
+    fn check_line_preparsed_note() {
+        check_pre(vec!["баренцово\\*12море"], vec![s("баренцово"), Note(12), s("море"), Space], vec![]);
+        check_pre(vec!["война\\*12 1912 года"], vec![s("война"), Note(12), s("1912 года"), Space], vec![]);
+        check_pre(vec!["\\*7"], vec![Note(7), Space], vec![]);
+        check_pre(vec!["\\:см. \\*3:"], vec![s("см. "), Note(3), Space], vec![r(Mark::Bold, 0, 2)]);
     }
 
     #[test]
     fn check_line_preparsed_line_common() {
-        let out = PreparsedLines::new(vec!["\\:a:"]);
-        let expected = PreparsedLines {
-            text: vec![InlineText::String("a")],
-            style_ranges: vec![Range{mark: Mark::Bold, start: 0, end: 1}]
-        };
-        assert_eq!(out, expected);
-
-        let out = PreparsedLines::new(vec!["\\:a:b\\;c;"]);
-        let expected = PreparsedLines {
-            text: vec![InlineText::String("a"), InlineText::String("b"), InlineText::String("c")],
-            style_ranges: vec![Range{mark: Mark::Bold, start: 0, end: 1}, Range{mark: Mark::Italic, start: 2, end: 3}]
-        };
-        assert_eq!(out, expected);
-
-        let out = PreparsedLines::new(vec!["\\;:x;"]);
-        let expected = PreparsedLines {
-            text: vec![InlineText::String(":x")],
-            style_ranges: vec![Range{mark: Mark::Italic, start: 0, end: 1}]
-        };
-        assert_eq!(out, expected);
-
-        let out = PreparsedLines::new(vec!["\\;\\:a:;"]);
-        let expected = PreparsedLines {
-            text: vec![InlineText::String("a")],
-            style_ranges: vec![Range{mark: Mark::Bold, start: 0, end: 1}, Range{mark: Mark::Italic, start: 0, end: 1}]
-        };
-        assert_eq!(out, expected);
+        check_pre(vec!["\\:a:"], vec![s("a"), Space], vec![r(Mark::Bold, 0, 1)]);
+        check_pre(vec!["\\:a:b\\;c;"], vec![s("a"), s("b"), s("c"), Space], vec![r(Mark::Bold, 0, 1), r(Mark::Italic, 2, 3)]);
+        check_pre(vec!["\\;:x;"], vec![s(":x"), Space], vec![r(Mark::Italic, 0, 1)]);
+        check_pre(vec!["\\;\\:a:;"], vec![s("a"), Space], vec![r(Mark::Bold, 0, 1), r(Mark::Italic, 0, 1)]);
 
         // ===== Mono =====
-
-        let out = PreparsedLines::new(vec!["\\!a!"]);
-        let expected = PreparsedLines {
-            text: vec![InlineText::String("a")],
-            style_ranges: vec![Range{mark: Mark::Mono, start: 0, end: 1}]
-        };
-        assert_eq!(out, expected);
-
-        let out = PreparsedLines::new(vec!["\\!a!b\\-c-"]);
-        let expected = PreparsedLines {
-            text: vec![InlineText::String("a"), InlineText::String("b"), InlineText::String("c")],
-            style_ranges: vec![Range{mark: Mark::Mono, start: 0, end: 1}, Range{mark: Mark::Strike, start: 2, end: 3}]
-        };
-        assert_eq!(out, expected);
-
-        let out = PreparsedLines::new(vec!["\\!-x!"]);
-        let expected = PreparsedLines {
-            text: vec![InlineText::String("-x")],
-            style_ranges: vec![Range{mark: Mark::Mono, start: 0, end: 1}]
-        };
-        assert_eq!(out, expected);
-
-        let out = PreparsedLines::new(vec!["\\!\\=a=!"]);
-        let expected = PreparsedLines {
-            text: vec![InlineText::String("a")],
-            style_ranges: vec![Range{mark: Mark::Under, start: 0, end: 1}, Range{mark: Mark::Mono, start: 0, end: 1}]
-        };
-        assert_eq!(out, expected);
+        check_pre(vec!["\\!a!"], vec![s("a"), Space], vec![r(Mark::Mono, 0, 1)]);
+        check_pre(vec!["\\!a!b\\-c-"], vec![s("a"), s("b"), s("c"), Space], vec![r(Mark::Mono, 0, 1), r(Mark::Strike, 2, 3)]);
+        check_pre(vec!["\\!-x!"], vec![s("-x"), Space], vec![r(Mark::Mono, 0, 1)]);
+        check_pre(vec!["\\!\\=a=!"], vec![s("a"), Space], vec![r(Mark::Under, 0, 1), r(Mark::Mono, 0, 1)]);
 
         // ===== Strike =====
-
-        let out = PreparsedLines::new(vec!["\\-a-"]);
-        let expected = PreparsedLines {
-            text: vec![InlineText::String("a")],
-            style_ranges: vec![Range{mark: Mark::Strike, start: 0, end: 1}]
-        };
-        assert_eq!(out, expected);
-
-        let out = PreparsedLines::new(vec!["\\-a-b\\=c="]);
-        let expected = PreparsedLines {
-            text: vec![InlineText::String("a"), InlineText::String("b"), InlineText::String("c")],
-            style_ranges: vec![Range{mark: Mark::Strike, start: 0, end: 1}, Range{mark: Mark::Under, start: 2, end: 3}]
-        };
-        assert_eq!(out, expected);
-
-        let out = PreparsedLines::new(vec!["\\-!x-"]);
-        let expected = PreparsedLines {
-            text: vec![InlineText::String("!x")],
-            style_ranges: vec![Range{mark: Mark::Strike, start: 0, end: 1}]
-        };
-        assert_eq!(out, expected);
-
-        let out = PreparsedLines::new(vec!["\\-\\!a!-"]);
-        let expected = PreparsedLines {
-            text: vec![InlineText::String("a")],
-            style_ranges: vec![Range{mark: Mark::Mono, start: 0, end: 1}, Range{mark: Mark::Strike, start: 0, end: 1}]
-        };
-        assert_eq!(out, expected);
+        check_pre(vec!["\\-a-"], vec![s("a"), Space], vec![r(Mark::Strike, 0, 1)]);
+        check_pre(vec!["\\-a-b\\=c="], vec![s("a"), s("b"), s("c"), Space], vec![r(Mark::Strike, 0, 1), r(Mark::Under, 2, 3)]);
+        check_pre(vec!["\\-!x-"], vec![s("!x"), Space], vec![r(Mark::Strike, 0, 1)]);
+        check_pre(vec!["\\-\\!a!-"], vec![s("a"), Space], vec![r(Mark::Mono, 0, 1), r(Mark::Strike, 0, 1)]);
 
         // ===== Under =====
+        check_pre(vec!["\\=a="], vec![s("a"), Space], vec![r(Mark::Under, 0, 1)]);
+        check_pre(vec!["\\=a=b\\!c!"], vec![s("a"), s("b"), s("c"), Space], vec![r(Mark::Under, 0, 1), r(Mark::Mono, 2, 3)]);
+        check_pre(vec!["\\=:x="], vec![s(":x"), Space], vec![r(Mark::Under, 0, 1)]);
+        check_pre(vec!["\\=\\-a-="], vec![s("a"), Space], vec![r(Mark::Strike, 0, 1), r(Mark::Under, 0, 1)]);
 
-        let out = PreparsedLines::new(vec!["\\=a="]);
-        let expected = PreparsedLines {
-            text: vec![InlineText::String("a")],
-            style_ranges: vec![Range{mark: Mark::Under, start: 0, end: 1}]
-        };
-        assert_eq!(out, expected);
-
-        let out = PreparsedLines::new(vec!["\\=a=b\\!c!"]);
-        let expected = PreparsedLines {
-            text: vec![InlineText::String("a"), InlineText::String("b"), InlineText::String("c")],
-            style_ranges: vec![Range{mark: Mark::Under, start: 0, end: 1}, Range{mark: Mark::Mono, start: 2, end: 3}]
-        };
-        assert_eq!(out, expected);
-
-        let out = PreparsedLines::new(vec!["\\=:x="]);
-        let expected = PreparsedLines {
-            text: vec![InlineText::String(":x")],
-            style_ranges: vec![Range{mark: Mark::Under, start: 0, end: 1}]
-        };
-        assert_eq!(out, expected);
-
-        let out = PreparsedLines::new(vec!["\\=\\-a-="]);
-        let expected = PreparsedLines {
-            text: vec![InlineText::String("a")],
-            style_ranges: vec![Range{mark: Mark::Strike, start: 0, end: 1}, Range{mark: Mark::Under, start: 0, end: 1}]
-        };
-        assert_eq!(out, expected);
+        check_pre(vec!["10:30; итог - 5 = 5!"], vec![s("10:30; итог - 5 = 5!"), Space], vec![]);
     }
+
+    #[test]
+    fn check_line_preparsed_shield() {
+        check_pre(vec!["\\:10_:30:"], vec![s("10"), s(":30"), Space], vec![r(Mark::Bold, 0, 2)]);
+        check_pre(vec!["a__:"], vec![s("a"), s("_:"), Space], vec![]);
+        check_pre(vec!["_\\:"], vec![s("\\:"), Space], vec![]);
+        check_pre(vec!["snake_case"], vec![s("snake_case"), Space], vec![]);
+        check_pre(vec!["имя_"], vec![s("имя_"), Space], vec![]);
+    }
+
+    #[test]
+    fn check_line_preparsed_nesting() {
+        check_pre(vec!["\\:a \\:b: c:"], vec![s("a "), s("b"), s(" c"), Space], vec![r(Mark::Bold, 1, 2), r(Mark::Bold, 0, 3)]);
+        check_pre(vec!["\\:a \\;b: c;"], vec![s("a "), s("b"), s(" c;"), Space], vec![r(Mark::Bold, 0, 2)]);
+        check_pre(vec!["\\:незакрытый"], vec![s("незакрытый"), Space], vec![r(Mark::Bold, 0, 1)]);
+        check_pre(vec!["\\:a \\;b c"], vec![s("a "), s("b c"), Space], vec![r(Mark::Italic, 1, 2), r(Mark::Bold, 0, 2)]);
+        check_pre(
+            vec!["\\:x \\%КРАС(a \\%СИН(b) c: d)"],
+            vec![s("x "), s("a "), s("b"), s(" c"), s(" d)"), Space],
+            vec![r(Mark::Color(blue()), 2, 3), r(Mark::Bold, 0, 4)]
+        );
+    }
+
+    #[test]
+    fn check_line_preparsed_multiline() {
+        check_pre(vec!["\\:a", "b:"], vec![s("a"), Space, s("b:"), Space], vec![r(Mark::Bold, 0, 1)]);
+        check_pre(vec!["\\%КРАС(a", "b)"], vec![s("a"), Space, s("b)"), Space], vec![r(Mark::Color(red()), 0, 1)]);
+    }
+
+    #[test]
+    fn check_line_preparsed_color() {
+        check_color("КРАС", red());
+        check_color("ЖЁЛ", Some(Color::YELLOW));
+        check_color("ЧЁРН", Some(Color::BLACK));
+        check_color("БИР", Some(Color::CYAN));
+        check_color("#1b2b20", Some(Color::new(0x1b, 0x2b, 0x20)));
+        check_color("#ABCDEF", Some(Color::new(0xab, 0xcd, 0xef)));
+        check_color("ц1б2б20", Some(Color::new(0x1b, 0x2b, 0x20)));
+        check_color("Ц1Б2Б20", Some(Color::new(0x1b, 0x2b, 0x20)));
+        check_color("цабвгде", Some(Color::new(0xab, 0xcd, 0xef)));
+        check_color("255103020", Some(Color::new(255, 103, 20)));
+        check_color("XYZ", None);
+        check_color("", None);
+        check_color("#1b2b2", None);
+        check_color("ц1б2б2", None);
+        check_color("25510302", None);
+        check_color("256000000", None);
+    }
+
+    #[test]
+    fn check_line_preparsed_color_exact_digits() {
+        check_color("#1b2b20ff", None);
+        check_color("ц1б2б200", None);
+        check_color("2551030201", None);
+    }
+
+    #[test]
+    fn check_line_preparsed_braces() {
+        check_pre(vec!["\\%КРАС(f(x)) y"], vec![s("f(x)"), s(" y"), Space], vec![r(Mark::Color(red()), 0, 1)]);
+        check_pre(vec!["\\%КРАС(a_)b) c"], vec![s("a"), s(")b"), s(" c"), Space], vec![r(Mark::Color(red()), 0, 2)]);
+        check_pre(vec!["a) \\%КРАС(b)"], vec![s("a) "), s("b"), Space], vec![r(Mark::Color(red()), 1, 2)]);
+        check_pre(vec!["\\%КРАС(a"], vec![s("a"), Space], vec![r(Mark::Color(red()), 0, 1)]);
+        check_pre(vec!["до \\%КРАС после"], vec![s("до "), Space], vec![]);
+        check_pre(vec!["до \\,a.ru после"], vec![s("до "), Space], vec![]);
+    }
+
+    #[test]
+    fn check_line_preparsed_link() {
+        check_pre(vec!["\\,a.ru(текст)"], vec![s("текст"), Space], vec![r(Mark::Link("a.ru"), 0, 1)]);
+        check_pre(
+            vec!["\\,google.com(google(гугл_))"],
+            vec![s("google(гугл"), s("))"), Space],
+            vec![r(Mark::Link("google.com"), 0, 2)]
+        );
+        check_pre(
+            vec!["\\,a.ru(x \\,b.ru(y) z)"],
+            vec![s("x "), s("y"), s(" z"), Space],
+            vec![r(Mark::Link("b.ru"), 1, 2), r(Mark::Link("a.ru"), 0, 3)]
+        );
+    }
+
+    #[test]
+    fn check_line_preparsed_unknown_tag() {
+        check_pre(vec!["\\Abc"], vec![s("Abc"), Space], vec![]);
+        check_pre(vec!["a\\Яb"], vec![s("a"), s("Яb"), Space], vec![]);
+        check_pre(vec!["\\\\:x:"], vec![s("x"), Space], vec![r(Mark::Bold, 0, 1)]);
+    }
+
+    #[test]
+    fn check_line_preparsed_invalid_outer_color() {
+        check_pre(
+            vec!["\\%XYZ(a \\%СИН(b) c)"],
+            vec![s("a "), s("b"), s(" c"), Space],
+            vec![r(Mark::Color(blue()), 1, 2), r(Mark::Color(None), 0, 3)]
+        );
+    }
+
+    // ===== Span =====
+
+    #[test]
+    fn check_line_spans_invalid_outer_color() {
+        check_spans(vec!["\\%XYZ(a \\%СИН(b) c)"], vec![(vec![s("a "), s("b"), s(" c")], plain())]);
+        check_spans(vec!["\\%XYZ(\\%СИН(x))"], vec![(vec![s("x")], plain())]);
+        check_spans(vec!["\\%XYZ(\\:a: \\%СИН(b))"], vec![
+            (vec![s("a")], bold()),
+            (vec![s(" "), s("b")], plain()),
+        ]);
+    }
+
+    #[test]
+    fn check_line_spans_format() {
+        check_spans(vec![], vec![]);
+        check_spans(vec![""], vec![(vec![Space], plain())]);
+        check_spans(vec!["\\:a \\:b: c:"], vec![(vec![s("a "), s("b"), s(" c")], bold())]);
+        check_spans(vec!["\\:a \\;b: c;"], vec![(vec![s("a "), s("b")], bold()), (vec![s(" c;")], plain())]);
+        check_spans(vec!["\\:a \\;b c"], vec![
+            (vec![s("a ")], bold()),
+            (vec![s("b c")], Style { is_italic: true, ..bold() }),
+        ]);
+        check_spans(vec!["\\=a="], vec![(vec![s("a")], Style { is_under: true, ..plain() })]);
+        check_spans(vec!["\\:\\;\\-\\=\\!x!=-;:"], vec![
+            (vec![s("x")], Style { is_bold: true, is_italic: true, is_mono: true, is_strike: true, is_under: true, color: None, link: None }),
+        ]);
+        check_spans(vec!["\\:a:\\:b:"], vec![(vec![s("a"), s("b")], bold())]);
+        check_spans(vec!["\\::a"], vec![(vec![s("a")], plain())]);
+        check_spans(vec!["\\:см. \\*3:"], vec![(vec![s("см. "), Note(3)], bold())]);
+    }
+
+    #[test]
+    fn check_line_spans_color() {
+        let red_style = Style { color: red(), ..plain() };
+        let blue_style = Style { color: blue(), ..plain() };
+        check_spans(vec!["\\%КРАС(a \\%СИН(b) c)"], vec![(vec![s("a "), s("b"), s(" c")], red_style)]);
+        check_spans(vec!["\\:x \\%КРАС(a \\%СИН(b) c: d)"], vec![
+            (vec![s("x "), s("a ")], bold()),
+            (vec![s("b")], Style { color: blue(), ..bold() }),
+            (vec![s(" c")], bold()),
+            (vec![s(" d)")], plain()),
+        ]);
+        check_spans(vec!["\\:\\%КРАС(Жирный) \\%СИН(сине) \\%КРАС(красный):"], vec![
+            (vec![s("Жирный")], Style { color: red(), ..bold() }),
+            (vec![s(" ")], bold()),
+            (vec![s("сине")], Style { color: blue(), ..bold() }),
+            (vec![s(" ")], bold()),
+            (vec![s("красный")], Style { color: red(), ..bold() }),
+        ]);
+        check_spans(vec!["\\%КРАС(a)\\%СИН(b)"], vec![
+            (vec![s("a")], Style { color: red(), ..plain() }),
+            (vec![s("b")], Style { color: blue(), ..plain() }),
+        ]);
+        check_spans(vec!["\\%КРАС(a)\\%КРАС(b)"], vec![(vec![s("a"), s("b")], Style { color: red(), ..plain() })]);
+        check_spans(vec!["\\%КРАС(\\%СИН(x))"], vec![(vec![s("x")], Style { color: red(), ..plain() })]);
+        check_spans(vec!["\\%КРАС()\\%СИН(x)"], vec![(vec![s("x")], blue_style)]);
+        check_spans(vec!["\\%КРАС(a", "b"], vec![
+            (vec![s("a")], Style { color: red(), ..plain() }),
+            (vec![Space, s("b")], plain()),
+        ]);
+        check_spans(vec!["\\%XYZ(a)"], vec![(vec![s("a")], plain())]);
+    }
+
+    #[test]
+    fn check_line_spans_link() {
+        let a = || Style { link: Some("a.ru"), ..plain() };
+        let b = || Style { link: Some("b.ru"), ..plain() };
+        check_spans(vec!["\\,a.ru(x \\,b.ru(y) z)"], vec![(vec![s("x "), s("y"), s(" z")], a())]);
+        check_spans(vec!["\\,a.ru(x) \\,a.ru(y)"], vec![
+            (vec![s("x")], a()),
+            (vec![s(" ")], plain()),
+            (vec![s("y")], a()),
+        ]);
+        check_spans(vec!["\\,a.ru(x)\\,a.ru(y)"], vec![(vec![s("x"), s("y")], a())]);
+        check_spans(vec!["\\,a.ru(x)\\,b.ru(y)"], vec![(vec![s("x")], a()), (vec![s("y")], b())]);
+        check_spans(vec!["\\,a.ru(\\%КРАС(x))"], vec![(vec![s("x")], Style { color: red(), ..a() })]);
+        check_spans(vec!["\\,a.ru(x", "y"], vec![(vec![s("x")], a()), (vec![Space, s("y")], plain())]);
+        check_spans(vec!["\\,a.ru(x", "\\,b.ru(y"], vec![
+            (vec![s("x")], a()),
+            (vec![Space], plain()),
+            (vec![s("y")], b()),
+        ]);
+    }
+
+    #[test]
+    fn check_line_spans_link_merge_multiline() {
+        check_spans(vec!["\\,справка(очень длинный текст)", "\\,справка(ссылки на справку)"], vec![
+            (vec![s("очень длинный текст"), Space, s("ссылки на справку")], Style { link: Some("справка"), ..plain() }),
+        ]);
+    }
+
+
+
 
     #[test]
     fn check_line_clear_braces_with_bold(){
