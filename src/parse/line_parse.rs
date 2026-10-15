@@ -5,30 +5,7 @@ use std::str::CharIndices;
 
 use crate::parse::{lexemas::*, common::*};
 
-#[derive(Debug, PartialEq, Default, Clone)]
-struct Color {
-    r: u8,
-    g: u8,
-    b: u8,
-}
 impl Color {
-    const BLACK: Self = Self {r: 0, g: 0, b: 0};
-    const WHITE: Self = Self {r: 255, g: 255, b: 255};
-    const RED: Self = Self {r: 255, g: 0, b: 0};
-    const ORANGE: Self = Self {r: 255, g: 128, b: 0};
-    const YELLOW: Self = Self {r: 255, g: 200, b: 0};
-    const GREEN: Self = Self {r: 0, g: 255, b: 0};
-    const LIGHT_BLUE: Self = Self {r: 0, g: 128, b: 255};
-    const DARK_BLUE: Self = Self {r: 0, g: 0, b: 255};
-    const MAGENTA: Self = Self {r: 200, g: 0, b: 255};
-    const PINK: Self = Self {r: 255, g: 128, b: 128};
-    const BROWN: Self = Self {r: 64, g: 32, b: 0};
-    const LEMON: Self = Self {r: 255, g: 247, b: 0};
-    const CHARTREUSE: Self = Self {r: 127, g: 255, b: 0};
-    const CYAN: Self = Self {r: 0, g: 200, b: 255};
-    const LAZULI: Self = Self {r: 38, g: 97, b: 156};
-    const FUCHSIA: Self = Self {r: 255, g: 0, b: 255};
-    
     fn ru_color_const(line: &str) -> Option<Color> {
         match line {
             "КРАС" => Some(Color::RED),
@@ -64,11 +41,6 @@ impl Color {
         }
     }
 
-
-    fn new(r: u8, g: u8, b: u8) -> Self {
-        Self { r, g, b }
-    }
-
     fn from_hex(col: &str) -> Option<Self>{
         let hex = col.strip_prefix('#').unwrap_or(col);
         Self::from_iterator( hex.chars().map(|c| c.to_digit(16).map(|d| d as u8)))
@@ -88,7 +60,7 @@ impl Color {
         match (next_byte(), next_byte(), next_byte()) {
             (Some(r), Some(g), Some(b)) => {
                 if digits.next().is_none() {
-                    return  Some(Self {r, g, b});
+                    return  Some(Self::new(r, g, b));
                 }
                 None
             },
@@ -121,8 +93,8 @@ impl Color {
             }
         }
     }
-
 }
+
 
 fn is_should_be_changed_on_name(ch: char) -> bool {
     ch == SHIELD || ch ==MARK || ch == SMALL_YO || ch.is_uppercase()
@@ -285,7 +257,7 @@ struct Range<'a> {
 }
 
 #[derive(Debug, PartialEq)]
-enum InlineText<'a> {
+pub(crate) enum InlinePreEl<'a> {
     String(&'a str),
     InnerLink(Cow<'a, str>, RefKind),
     Note(u16),
@@ -293,8 +265,8 @@ enum InlineText<'a> {
 }
 
 #[derive(Debug, PartialEq)]
-struct PreparsedLines<'a> {
-    text: Vec<InlineText<'a>>,
+pub(crate)  struct PreparsedLines<'a> {
+    text: Vec<InlinePreEl<'a>>,
     style_ranges: Vec<Range<'a>>
 }
 
@@ -316,7 +288,7 @@ impl<'a> PreparsedLines<'a> {
         end: usize
     ) {
         if start < end {
-             out.text.push(InlineText::String(&line[start..end])); 
+             out.text.push(InlinePreEl::String(&line[start..end])); 
         }
     }
 
@@ -417,7 +389,7 @@ impl<'a> PreparsedLines<'a> {
                                         let name_end = Self::find_link_end(line, name_start);
                                         while chars.next_if(|&(j, _)| j <= name_end).is_some() {}
                                         let name = clear_name_attribute(&line[name_start..name_end]);
-                                        out.text.push(InlineText::InnerLink(name, kind));
+                                        out.text.push(InlinePreEl::InnerLink(name, kind));
                                         byte_after_last_tag = (name_end + RBRACE.len_utf8()).min(line.len());
                                     } else if let Some((start, _)) = chars.next_if(|&(_, c)| c.is_ascii_digit()) {
                                         let mut end = start + 1;
@@ -425,7 +397,7 @@ impl<'a> PreparsedLines<'a> {
                                             end += 1;
                                         }
                                         let n = line[start..end].parse::<u16>().unwrap_or(u16::MAX);
-                                        out.text.push(InlineText::Note(n));
+                                        out.text.push(InlinePreEl::Note(n));
                                         if let Some(_) = chars.next_if(|&(_, c)| c == SPACE) {
                                             byte_after_last_tag = end + SPACE.len_utf8();    
                                         } else {
@@ -488,7 +460,7 @@ impl<'a> PreparsedLines<'a> {
             for open in open_stack.into_iter().rev() {
                 out.style_ranges.push(Range { mark: open.mark, start: open.start, end: out.text.len()});
             }
-            out.text.push(InlineText::Space);
+            out.text.push(InlinePreEl::Space);
             
         }
 
@@ -499,7 +471,7 @@ impl<'a> PreparsedLines<'a> {
 
 
 #[derive(Debug, Default, Clone)]
-struct StyleDiff<'a> {
+struct PreStyleDiff<'a> {
     bold: i32,
     italic: i32,
     mono: i32,
@@ -513,9 +485,9 @@ struct StyleDiff<'a> {
     link: Option<&'a str>
     
 }
-impl<'a> StyleDiff<'a> {
-    fn to_style(&self) -> Style<'a> {
-        Style {
+impl<'a> PreStyleDiff<'a> {
+    fn to_style(&self) -> PreStyle<'a> {
+        PreStyle {
             is_bold: self.bold > 0,
             is_italic: self.italic > 0,
             is_mono: self.mono > 0,
@@ -527,7 +499,7 @@ impl<'a> StyleDiff<'a> {
     }
 }
 
-impl<'a> AddAssign for StyleDiff<'a> {
+impl<'a> AddAssign for PreStyleDiff<'a> {
     fn add_assign(&mut self, rhs: Self) {
         self.bold += rhs.bold;
         self.italic += rhs.italic;
@@ -550,28 +522,28 @@ impl<'a> AddAssign for StyleDiff<'a> {
 }
 
 #[derive(Debug, PartialEq)]
-struct Style<'a> {
-    is_bold: bool,
-    is_italic: bool,
-    is_mono: bool,
-    is_strike: bool,
-    is_under: bool,
-    color: Option<Color>,
-    link: Option<&'a str>
+pub(crate) struct PreStyle<'a> {
+    pub(crate) is_bold: bool,
+    pub(crate) is_italic: bool,
+    pub(crate) is_mono: bool,
+    pub(crate) is_strike: bool,
+    pub(crate) is_under: bool,
+    pub(crate) color: Option<Color>,
+    pub(crate) link: Option<&'a str>
 }
 
 
 #[derive(Debug)]
-pub(crate) struct Span<'a> {
-    text: Vec<InlineText<'a>>,
-    style: Style<'a>
+pub(crate) struct PreSpan<'a> {
+    pub(crate) text: Vec<InlinePreEl<'a>>,
+    pub(crate) style: PreStyle<'a>
 }
-impl<'a> Span<'a>{
-    fn new(text: Vec<InlineText<'a>>, style: Style<'a>) -> Self {
+impl<'a> PreSpan<'a>{
+    fn new(text: Vec<InlinePreEl<'a>>, style: PreStyle<'a>) -> Self {
         Self {text, style}
     }
 
-    fn push(&mut self, line: InlineText<'a>) {
+    fn push(&mut self, line: InlinePreEl<'a>) {
         self.text.push(line);
     }
 }
@@ -579,8 +551,8 @@ impl<'a> Span<'a>{
 
 
 
-pub(crate) fn generate_spans<'a>(preparsed: PreparsedLines<'a>) -> Vec<Span<'a>> {
-    let mut difs: Vec<StyleDiff> = vec![StyleDiff::default(); preparsed.text.len()];
+pub(crate) fn generate_spans<'a>(preparsed: PreparsedLines<'a>) -> Vec<PreSpan<'a>> {
+    let mut difs: Vec<PreStyleDiff> = vec![PreStyleDiff::default(); preparsed.text.len()];
     
     for range in preparsed.style_ranges {
         match range.mark {
@@ -618,20 +590,20 @@ pub(crate) fn generate_spans<'a>(preparsed: PreparsedLines<'a>) -> Vec<Span<'a>>
         }
     }
 
-    let mut out:Vec<Span> = Vec::new();
-    let mut counter = StyleDiff::default();
+    let mut out:Vec<PreSpan> = Vec::new();
+    let mut counter = PreStyleDiff::default();
     let mut items = preparsed.text.into_iter().zip(difs).peekable();
     while let Some((text, delta)) = items.next() {
         if let Some(last) = out.last_mut() {
             match text {
-                InlineText::Space => {
+                InlinePreEl::Space => {
                     if let Some(next_style) = items.peek().map(|(_, d)| d) {
                         let next_style = next_style.to_style();
                         if counter.to_style() == next_style {
                             last.push(text);
                         } else {
                             counter += delta;
-                            out.push(Span::new(vec![text], counter.to_style()));
+                            out.push(PreSpan::new(vec![text], counter.to_style()));
                         }
                     }
                 },
@@ -640,13 +612,13 @@ pub(crate) fn generate_spans<'a>(preparsed: PreparsedLines<'a>) -> Vec<Span<'a>>
                     if counter.to_style() == last.style{
                         last.push(text);
                     } else {
-                        out.push(Span::new(vec![text], counter.to_style()));
+                        out.push(PreSpan::new(vec![text], counter.to_style()));
                     }
                 }
             }
         } else {
             counter += delta;
-            out.push(Span::new(vec![text], counter.to_style()));
+            out.push(PreSpan::new(vec![text], counter.to_style()));
         }
         
         
@@ -668,14 +640,14 @@ pub(crate) fn generate_spans<'a>(preparsed: PreparsedLines<'a>) -> Vec<Span<'a>>
         assert_eq!(clear_name_attribute(input), expected);
     }
 
-    use super::InlineText::{Note, Space};
+    use super::InlinePreEl::{Note, Space};
 
-    fn s(text: &str) -> InlineText<'_> {
-        InlineText::String(text)
+    fn s(text: &str) -> InlinePreEl<'_> {
+        InlinePreEl::String(text)
     }
 
-    fn inner(name: &str, kind: RefKind) -> InlineText<'_> {
-        InlineText::InnerLink(Cow::Borrowed(name), kind)
+    fn inner(name: &str, kind: RefKind) -> InlinePreEl<'_> {
+        InlinePreEl::InnerLink(Cow::Borrowed(name), kind)
     }
 
     fn r(mark: Mark<'_>, start: usize, end: usize) -> Range<'_> {
@@ -685,7 +657,7 @@ pub(crate) fn generate_spans<'a>(preparsed: PreparsedLines<'a>) -> Vec<Span<'a>>
     fn red() -> Option<Color> { Some(Color::RED) }
     fn blue() -> Option<Color> { Some(Color::DARK_BLUE) }
 
-    fn check_pre<'a>(lines: Vec<&'a str>, text: Vec<InlineText<'a>>, style_ranges: Vec<Range<'a>>) {
+    fn check_pre<'a>(lines: Vec<&'a str>, text: Vec<InlinePreEl<'a>>, style_ranges: Vec<Range<'a>>) {
         let out = PreparsedLines::new(lines.clone());
         assert_eq!(out, PreparsedLines { text, style_ranges }, "вход: {lines:?}");
     }
@@ -695,18 +667,18 @@ pub(crate) fn generate_spans<'a>(preparsed: PreparsedLines<'a>) -> Vec<Span<'a>>
         check_pre(vec![&line], vec![s("x"), Space], vec![r(Mark::Color(color), 0, 1)]);
     }
 
-    fn plain() -> Style<'static> {
-        Style {
+    fn plain() -> PreStyle<'static> {
+        PreStyle {
             is_bold: false, is_italic: false, is_mono: false, is_strike: false, is_under: false,
             color: None, link: None
         }
     }
 
-    fn bold() -> Style<'static> {
-        Style { is_bold: true, ..plain() }
+    fn bold() -> PreStyle<'static> {
+        PreStyle { is_bold: true, ..plain() }
     }
 
-    fn check_spans<'a>(lines: Vec<&'a str>, expected: Vec<(Vec<InlineText<'a>>, Style<'a>)>) {
+    fn check_spans<'a>(lines: Vec<&'a str>, expected: Vec<(Vec<InlinePreEl<'a>>, PreStyle<'a>)>) {
         let out: Vec<_> = generate_spans(PreparsedLines::new(lines.clone()))
             .into_iter()
             .map(|span| (span.text, span.style))
@@ -873,7 +845,7 @@ pub(crate) fn generate_spans<'a>(preparsed: PreparsedLines<'a>) -> Vec<Span<'a>>
 
     #[test]
     fn check_line_spans_link_quoted() {
-        check_spans(vec!["\\,\"a.ru/(1)\"(x)"], vec![(vec![s("x")], Style { link: Some("a.ru/(1)"), ..plain() })]);
+        check_spans(vec!["\\,\"a.ru/(1)\"(x)"], vec![(vec![s("x")], PreStyle { link: Some("a.ru/(1)"), ..plain() })]);
     }
 
     #[test]
@@ -912,11 +884,11 @@ pub(crate) fn generate_spans<'a>(preparsed: PreparsedLines<'a>) -> Vec<Span<'a>>
         check_spans(vec!["\\:a \\;b: c;"], vec![(vec![s("a "), s("b")], bold()), (vec![s(" c;")], plain())]);
         check_spans(vec!["\\:a \\;b c"], vec![
             (vec![s("a ")], bold()),
-            (vec![s("b c")], Style { is_italic: true, ..bold() }),
+            (vec![s("b c")], PreStyle { is_italic: true, ..bold() }),
         ]);
-        check_spans(vec!["\\=a="], vec![(vec![s("a")], Style { is_under: true, ..plain() })]);
+        check_spans(vec!["\\=a="], vec![(vec![s("a")], PreStyle { is_under: true, ..plain() })]);
         check_spans(vec!["\\:\\;\\-\\=\\!x!=-;:"], vec![
-            (vec![s("x")], Style { is_bold: true, is_italic: true, is_mono: true, is_strike: true, is_under: true, color: None, link: None }),
+            (vec![s("x")], PreStyle { is_bold: true, is_italic: true, is_mono: true, is_strike: true, is_under: true, color: None, link: None }),
         ]);
         check_spans(vec!["\\:a:\\:b:"], vec![(vec![s("a"), s("b")], bold())]);
         check_spans(vec!["\\::a"], vec![(vec![s("a")], plain())]);
@@ -925,31 +897,31 @@ pub(crate) fn generate_spans<'a>(preparsed: PreparsedLines<'a>) -> Vec<Span<'a>>
 
     #[test]
     fn check_line_spans_color() {
-        let red_style = Style { color: red(), ..plain() };
-        let blue_style = Style { color: blue(), ..plain() };
+        let red_style = PreStyle { color: red(), ..plain() };
+        let blue_style = PreStyle { color: blue(), ..plain() };
         check_spans(vec!["\\%КРАС(a \\%СИН(b) c)"], vec![(vec![s("a "), s("b"), s(" c")], red_style)]);
         check_spans(vec!["\\:x \\%КРАС(a \\%СИН(b) c: d)"], vec![
             (vec![s("x "), s("a ")], bold()),
-            (vec![s("b")], Style { color: blue(), ..bold() }),
+            (vec![s("b")], PreStyle { color: blue(), ..bold() }),
             (vec![s(" c")], bold()),
             (vec![s(" d)")], plain()),
         ]);
         check_spans(vec!["\\:\\%КРАС(Жирный) \\%СИН(сине) \\%КРАС(красный):"], vec![
-            (vec![s("Жирный")], Style { color: red(), ..bold() }),
+            (vec![s("Жирный")], PreStyle { color: red(), ..bold() }),
             (vec![s(" ")], bold()),
-            (vec![s("сине")], Style { color: blue(), ..bold() }),
+            (vec![s("сине")], PreStyle { color: blue(), ..bold() }),
             (vec![s(" ")], bold()),
-            (vec![s("красный")], Style { color: red(), ..bold() }),
+            (vec![s("красный")], PreStyle { color: red(), ..bold() }),
         ]);
         check_spans(vec!["\\%КРАС(a)\\%СИН(b)"], vec![
-            (vec![s("a")], Style { color: red(), ..plain() }),
-            (vec![s("b")], Style { color: blue(), ..plain() }),
+            (vec![s("a")], PreStyle { color: red(), ..plain() }),
+            (vec![s("b")], PreStyle { color: blue(), ..plain() }),
         ]);
-        check_spans(vec!["\\%КРАС(a)\\%КРАС(b)"], vec![(vec![s("a"), s("b")], Style { color: red(), ..plain() })]);
-        check_spans(vec!["\\%КРАС(\\%СИН(x))"], vec![(vec![s("x")], Style { color: red(), ..plain() })]);
+        check_spans(vec!["\\%КРАС(a)\\%КРАС(b)"], vec![(vec![s("a"), s("b")], PreStyle { color: red(), ..plain() })]);
+        check_spans(vec!["\\%КРАС(\\%СИН(x))"], vec![(vec![s("x")], PreStyle { color: red(), ..plain() })]);
         check_spans(vec!["\\%КРАС()\\%СИН(x)"], vec![(vec![s("x")], blue_style)]);
         check_spans(vec!["\\%КРАС(a", "b"], vec![
-            (vec![s("a")], Style { color: red(), ..plain() }),
+            (vec![s("a")], PreStyle { color: red(), ..plain() }),
             (vec![Space, s("b")], plain()),
         ]);
         check_spans(vec!["\\%XYZ(a)"], vec![(vec![s("a")], plain())]);
@@ -957,8 +929,8 @@ pub(crate) fn generate_spans<'a>(preparsed: PreparsedLines<'a>) -> Vec<Span<'a>>
 
     #[test]
     fn check_line_spans_link() {
-        let a = || Style { link: Some("a.ru"), ..plain() };
-        let b = || Style { link: Some("b.ru"), ..plain() };
+        let a = || PreStyle { link: Some("a.ru"), ..plain() };
+        let b = || PreStyle { link: Some("b.ru"), ..plain() };
         check_spans(vec!["\\,a.ru(x \\,b.ru(y) z)"], vec![(vec![s("x "), s("y"), s(" z")], a())]);
         check_spans(vec!["\\,a.ru(x) \\,a.ru(y)"], vec![
             (vec![s("x")], a()),
@@ -967,7 +939,7 @@ pub(crate) fn generate_spans<'a>(preparsed: PreparsedLines<'a>) -> Vec<Span<'a>>
         ]);
         check_spans(vec!["\\,a.ru(x)\\,a.ru(y)"], vec![(vec![s("x"), s("y")], a())]);
         check_spans(vec!["\\,a.ru(x)\\,b.ru(y)"], vec![(vec![s("x")], a()), (vec![s("y")], b())]);
-        check_spans(vec!["\\,a.ru(\\%КРАС(x))"], vec![(vec![s("x")], Style { color: red(), ..a() })]);
+        check_spans(vec!["\\,a.ru(\\%КРАС(x))"], vec![(vec![s("x")], PreStyle { color: red(), ..a() })]);
         check_spans(vec!["\\,a.ru(x", "y"], vec![(vec![s("x")], a()), (vec![Space, s("y")], plain())]);
         check_spans(vec!["\\,a.ru(x", "\\,b.ru(y"], vec![
             (vec![s("x")], a()),
@@ -979,7 +951,7 @@ pub(crate) fn generate_spans<'a>(preparsed: PreparsedLines<'a>) -> Vec<Span<'a>>
     #[test]
     fn check_line_spans_link_merge_multiline() {
         check_spans(vec!["\\,справка(очень длинный текст)", "\\,справка(ссылки на справку)"], vec![
-            (vec![s("очень длинный текст"), Space, s("ссылки на справку")], Style { link: Some("справка"), ..plain() }),
+            (vec![s("очень длинный текст"), Space, s("ссылки на справку")], PreStyle { link: Some("справка"), ..plain() }),
         ]);
     }
 

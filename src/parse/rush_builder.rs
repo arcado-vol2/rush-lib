@@ -1,17 +1,93 @@
 use std::path::PathBuf;
 
-use crate::parse::{common::*, line_parse::{Span, generate_spans}};
+use crate::parse::{block_fragmentation::FlatLexedProject, common::*, line_parse::{InlinePreEl, PreSpan, generate_spans}, link_project::GlobalProject};
 
+ 
 
-enum ListElKind {
-    Ordered,
-    Unordered
+enum OuterLink<'a> {
+    URL(&'a str),
+    File(PathBuf)
 }
+
+enum InlineEl<'a> {
+    String(&'a str),
+    InnerLink(Option<u16>),
+    Note(Option<u16>),
+    Space
+}
+
+
+struct Style<'a> {
+    is_bold: bool,
+    is_italic: bool,
+    is_mono: bool,
+    is_strike: bool,
+    is_under: bool,
+    color: Option<Color>,
+    link: Option<OuterLink<'a>>,
+}
+
+
+struct Span<'a> {
+    text: Vec<InlineEl<'a>>,
+    style: Style<'a>
+}
+
+impl<'a> Span<'a> {
+    fn from_pre_span(pre: PreSpan<'a>, outer_links: &GlobalProject, inner_links: &FlatLexedProject) -> Self {
+        
+        let link: Option<OuterLink> = match pre.style.link {
+            Some(pre_link) => {
+                match outer_links.files.get(pre_link) {
+                    Some(path) => Some(OuterLink::File(path.clone())),
+                    None => Some(OuterLink::URL(pre_link))
+                }
+            }
+            None => None
+        };
+        let style = Style {
+            is_bold: pre.style.is_bold,
+            is_italic: pre.style.is_italic,
+            is_mono: pre.style.is_mono,
+            is_strike: pre.style.is_strike,
+            is_under: pre.style.is_under,
+            color: pre.style.color,
+            link: link
+        };
+
+        let text = pre.text.into_iter()
+        .map(|el| match el {
+            InlinePreEl::String(s) => InlineEl::String(s),
+            InlinePreEl::Space => InlineEl::Space,
+            InlinePreEl::InnerLink(s, k) => {
+                match k {
+                    RefKind::Code => InlineEl::InnerLink(inner_links.code.data.get(&s).copied()),
+                    RefKind::Formula =>  InlineEl::InnerLink(inner_links.formulas.data.get(&s).copied()),
+                    RefKind::Table =>  InlineEl::InnerLink(inner_links.tables.data.get(&s).copied()),
+                    RefKind::Image =>  InlineEl::InnerLink(inner_links.images.data.get(&s).copied()),
+                }
+            },
+            InlinePreEl::Note(n) => InlineEl::Note(inner_links.notes.get(&n).copied())
+        }).collect();
+        Self { text, style }
+    }
+}
+
+
+
+enum ListElKind<'a> {
+    Ordered(Vec<Span<'a>>),
+    Unordered(Vec<Span<'a>>)
+}
+
+
+
 struct ListEl<'a> {
-    kind: ListElKind,
-    indent: u16,
-    text: Span<'a>
+    this: Option<ListElKind<'a>>,
+    children: Vec<ListEl<'a>>
 }
+
+
 enum Aligment {
     Left,
     Center,
@@ -36,7 +112,7 @@ struct Paragraph<'a> {
 }
 struct Header<'a> {
     level: u8,
-    content: Span<'a>
+    content: Vec<Span<'a>>
 }
 
 struct Comment<'a> {
@@ -44,30 +120,30 @@ struct Comment<'a> {
 }
 
 struct Formula<'a> {
-    named: Named<'a>,
+    named: Named<Vec<Span<'a>>>,
     content: Vec<&'a str>
 }
 
 struct Code<'a> {
-    named: Named<'a>,
+    named: Named<Vec<Span<'a>>>,
     content: Vec<&'a str>
 }
 
 struct Image<'a> {
-    meta: ImageKind<'a>,
-    path: PathBuf
+    meta: ImageKind<Vec<Span<'a>>>,
+    path: Option<PathBuf>
 }
 
 struct Note<'a> {
     index: u16,
-    content: Span<'a>
+    content: Vec<Span<'a>>
 }
  
 struct List<'a> {
     content: Vec<ListEl<'a>>
 }
 struct Table<'a> {
-    named: Named<'a>,
+    named: Named<Vec<Span<'a>>>,
     headers: Vec<Vec<TableEl<'a>>>,
     aligments: Vec<Aligment>,
     cells: Vec<Vec<TableEl<'a>>>,

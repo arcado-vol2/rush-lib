@@ -8,12 +8,12 @@ use crate::parse::{lexemas::*, line_parse::clear_name_attribute, common::*};
 pub(crate) enum BlockKind<'a> {
     Paragraph,
     List,
-    Table(Named<'a>),
+    Table(Named<&'a str>),
     Header(u8),
     Comment,
-    Formula(Named<'a>),
-    Code(Named<'a>),
-    Image(ImageKind<'a>),
+    Formula(Named<&'a str>),
+    Code(Named<&'a str>),
+    Image(ImageKind<&'a str>),
     Note(u16)
 }
 
@@ -27,9 +27,9 @@ pub(crate) struct Block<'a> {
 
 
 #[derive(Debug, PartialEq)]
-struct NamedLinkable<'a> {
-    counter: u16,
-    data: HashMap<Cow<'a, str>, u16>
+pub(crate) struct NamedLinkable<'a> {
+    pub(crate)  counter: u16,
+    pub(crate) data: HashMap<Cow<'a, str>, u16>
 }
 impl<'a> NamedLinkable<'a> {
     fn register(&mut self, name: Cow<'a, str>) -> u16 {
@@ -76,14 +76,14 @@ impl<'a> FlatLexedProject<'a> {
     }
 
   
-    fn register_named(&mut self, kind: RefKind, raw_name: &'a str) -> Named<'a> {
+    fn register_named(&mut self, kind: RefKind, raw_name: &'a str) -> Named<&'a str> {
         let linkable = self.named_linkable_mut(kind);
         match resolve_name(raw_name) {
             Some(name) if linkable.counter < u16::MAX => {
                 let id = linkable.register(clear_name_attribute(name));
-                Named::new(Some(name), id)
+                Named::WithName { name, index: id }
             },
-            _ => Named::none()
+            _ => Named::Anonymous
         }
     }
 
@@ -846,7 +846,7 @@ use crate::parse::{common::*, block_fragmentation::{FlatLexedProject, Block, Blo
             code: refs(&[("aa", 1)]),
             blocks: vec![
                 Block {
-                    kind: BlockKind::Code(Named::new(Some("aa"), 1)),
+                    kind: BlockKind::Code(Named::WithName { name: "aa", index: 1 }),
                     lines: vec!["bb"]
                 }
             ],
@@ -861,7 +861,7 @@ use crate::parse::{common::*, block_fragmentation::{FlatLexedProject, Block, Blo
         let out = split_blocks(source);
         let expected = project(vec![
             Block {
-                kind: BlockKind::Code(Named::none()),
+                kind: BlockKind::Code(Named::Anonymous),
                 lines: vec!["aa"]
             }
         ]);
@@ -876,7 +876,7 @@ use crate::parse::{common::*, block_fragmentation::{FlatLexedProject, Block, Blo
             code: refs(&[("aa", 1)]),
             blocks: vec![
                 Block {
-                    kind: BlockKind::Code(Named::new(Some("aa"), 1)),
+                    kind: BlockKind::Code(Named::WithName { name: "aa", index: 1 }),
                     lines: vec!["\t   bb", "   cc", "", "\tdd"]
                 }
             ],
@@ -893,7 +893,7 @@ use crate::parse::{common::*, block_fragmentation::{FlatLexedProject, Block, Blo
             code: refs(&[("aa", 1)]),
             blocks: vec![
                 Block {
-                    kind: BlockKind::Code(Named::new(Some("aa"), 1)),
+                    kind: BlockKind::Code(Named::WithName { name: "aa", index: 1 }),
                     lines: vec!["bb"]
                 }
             ],
@@ -910,7 +910,7 @@ use crate::parse::{common::*, block_fragmentation::{FlatLexedProject, Block, Blo
             code: refs(&[("aa", 1)]),
             blocks: vec![
                 Block {
-                    kind: BlockKind::Code(Named::new(Some("aa"), 1)),
+                    kind: BlockKind::Code(Named::WithName { name: "aa", index: 1 }),
                     lines: vec!["bb"]
                 }
             ],
@@ -953,7 +953,7 @@ use crate::parse::{common::*, block_fragmentation::{FlatLexedProject, Block, Blo
             code: refs(&[("aa", 1)]),
             blocks: vec![
                 Block {
-                    kind: BlockKind::Code(Named::new(Some("aa"), 1)),
+                    kind: BlockKind::Code(Named::WithName { name: "aa", index: 1 }),
                     lines: vec!["  ", "bb", "cc"]
                 }
             ],
@@ -975,7 +975,7 @@ use crate::parse::{common::*, block_fragmentation::{FlatLexedProject, Block, Blo
                     lines: vec![ "bb", "cc"]
                 },
                 Block {
-                    kind: BlockKind::Code(Named::new(Some("dd"), 1)),
+                    kind: BlockKind::Code(Named::WithName { name: "dd", index: 1 }),
                     lines: vec!["ee"]
                 }
             ],
@@ -996,7 +996,7 @@ use crate::parse::{common::*, block_fragmentation::{FlatLexedProject, Block, Blo
                     lines: vec![ "aa"]
                 },
                 Block {
-                    kind: BlockKind::Code(Named::new(Some("bb"), 1)),
+                    kind: BlockKind::Code(Named::WithName { name: "bb", index: 1 }),
                     lines: vec!["cc"]
                 },
                 Block {
@@ -1219,7 +1219,7 @@ use crate::parse::{common::*, block_fragmentation::{FlatLexedProject, Block, Blo
             formulas: refs(&[("aa", 1)]),
             blocks: vec![
                 Block {
-                    kind: BlockKind::Formula(Named::new(Some("aa"), 1)),
+                    kind: BlockKind::Formula(Named::WithName { name: "aa", index: 1 }),
                     lines: vec!["bb"]
                 }
             ],
@@ -1234,7 +1234,7 @@ use crate::parse::{common::*, block_fragmentation::{FlatLexedProject, Block, Blo
         let out = split_blocks(source);
         let expected = project(vec![
             Block {
-                kind: BlockKind::Formula(Named::none()),
+                kind: BlockKind::Formula(Named::Anonymous),
                 lines: vec!["aa"]
             }
         ]);
@@ -1249,7 +1249,7 @@ use crate::parse::{common::*, block_fragmentation::{FlatLexedProject, Block, Blo
             formulas: refs(&[("aa", 1)]),
             blocks: vec![
                 Block {
-                    kind: BlockKind::Formula(Named::new(Some("aa"), 1)),
+                    kind: BlockKind::Formula(Named::WithName { name: "aa", index: 1 }),
                     lines: vec!["bb"]
                 }
             ],
@@ -1279,7 +1279,7 @@ use crate::parse::{common::*, block_fragmentation::{FlatLexedProject, Block, Blo
             formulas: refs(&[("aa", 1)]),
             blocks: vec![
                 Block {
-                    kind: BlockKind::Formula(Named::new(Some("aa"), 1)),
+                    kind: BlockKind::Formula(Named::WithName { name: "aa", index: 1 }),
                     lines: vec!["bb"]
                 }
             ],
@@ -1296,7 +1296,7 @@ use crate::parse::{common::*, block_fragmentation::{FlatLexedProject, Block, Blo
             formulas: refs(&[("aa", 1)]),
             blocks: vec![
                 Block {
-                    kind: BlockKind::Formula(Named::new(Some("aa"), 1)),
+                    kind: BlockKind::Formula(Named::WithName { name: "aa", index: 1 }),
                     lines: vec!["  \\frac{a}{b}\t", "\t= c"]
                 }
             ],
@@ -1313,7 +1313,7 @@ use crate::parse::{common::*, block_fragmentation::{FlatLexedProject, Block, Blo
             formulas: refs(&[("aa", 1)]),
             blocks: vec![
                 Block {
-                    kind: BlockKind::Formula(Named::new(Some("aa"), 1)),
+                    kind: BlockKind::Formula(Named::WithName { name: "aa", index: 1 }),
                     lines: vec!["bb"]
                 }
             ],
@@ -1330,7 +1330,7 @@ use crate::parse::{common::*, block_fragmentation::{FlatLexedProject, Block, Blo
             formulas: refs(&[("aa", 1)]),
             blocks: vec![
                 Block {
-                    kind: BlockKind::Formula(Named::new(Some("aa"), 1)),
+                    kind: BlockKind::Formula(Named::WithName { name: "aa", index: 1 }),
                     lines: vec!["bb"]
                 }
             ],
@@ -1403,7 +1403,7 @@ use crate::parse::{common::*, block_fragmentation::{FlatLexedProject, Block, Blo
             formulas: refs(&[("aa", 1)]),
             blocks: vec![
                 Block {
-                    kind: BlockKind::Formula(Named::new(Some("aa"), 1)),
+                    kind: BlockKind::Formula(Named::WithName { name: "aa", index: 1 }),
                     lines: vec!["  ", "bb", "", "cc"]
                 }
             ],
@@ -1424,7 +1424,7 @@ use crate::parse::{common::*, block_fragmentation::{FlatLexedProject, Block, Blo
                     lines: vec!["bb", "cc"]
                 },
                 Block {
-                    kind: BlockKind::Formula(Named::new(Some("dd"), 1)),
+                    kind: BlockKind::Formula(Named::WithName { name: "dd", index: 1 }),
                     lines: vec!["ee"]
                 }
             ],
@@ -1445,7 +1445,7 @@ use crate::parse::{common::*, block_fragmentation::{FlatLexedProject, Block, Blo
                     lines: vec!["aa"]
                 },
                 Block {
-                    kind: BlockKind::Formula(Named::new(Some("bb"), 1)),
+                    kind: BlockKind::Formula(Named::WithName { name: "bb", index: 1 }),
                     lines: vec!["cc"]
                 },
                 Block {
@@ -1466,7 +1466,7 @@ use crate::parse::{common::*, block_fragmentation::{FlatLexedProject, Block, Blo
             formulas: refs(&[("aa", 1)]),
             blocks: vec![
                 Block {
-                    kind: BlockKind::Formula(Named::new(Some("aa"), 1)),
+                    kind: BlockKind::Formula(Named::WithName { name: "aa", index: 1 }),
                     lines: vec!["\\+ bb", "\\\"", "\\// cc", "\\//"]
                 }
             ],
@@ -1483,7 +1483,7 @@ use crate::parse::{common::*, block_fragmentation::{FlatLexedProject, Block, Blo
             formulas: refs(&[("aa", 1)]),
             blocks: vec![
                 Block {
-                    kind: BlockKind::Formula(Named::new(Some("aa"), 1)),
+                    kind: BlockKind::Formula(Named::WithName { name: "aa", index: 1 }),
                     lines: vec!["bb"]
                 },
                 Block {
@@ -1505,7 +1505,7 @@ use crate::parse::{common::*, block_fragmentation::{FlatLexedProject, Block, Blo
             images: refs(&[("bb", 1)]),
             blocks: vec![
                 Block {
-                    kind: BlockKind::Image(ImageKind {named: Named {name: Some("bb"), index: 1}, scale: 110}),
+                    kind: BlockKind::Image(ImageKind {named: Named::WithName { name: "bb", index: 1 }, scale: 110}),
                     lines: vec!["aa"]
                 }
             ],
@@ -1521,7 +1521,7 @@ use crate::parse::{common::*, block_fragmentation::{FlatLexedProject, Block, Blo
         let expected = FlatLexedProject {
             images: refs(&[("bb", 1)]),
             blocks: vec![
-                Block { kind: BlockKind::Image(ImageKind { named: Named {name: Some("bb"), index: 1}, scale: 100}), lines: vec!["aa"] }
+                Block { kind: BlockKind::Image(ImageKind { named: Named::WithName { name: "bb", index: 1 }, scale: 100}), lines: vec!["aa"] }
             ],
             ..Default::default()
         };
@@ -1587,7 +1587,7 @@ use crate::parse::{common::*, block_fragmentation::{FlatLexedProject, Block, Blo
             tables: refs(&[("tt", 1)]),
             blocks: vec![
                 Block {
-                    kind: BlockKind::Table(Named::new(Some("tt"), 1)),
+                    kind: BlockKind::Table(Named::WithName { name: "tt", index: 1 }),
                     lines: vec!["/aa/bb/", "\\№- Л / Л", "/cc/dd/"]
                 }
             ],
@@ -1793,7 +1793,7 @@ use crate::parse::{common::*, block_fragmentation::{FlatLexedProject, Block, Blo
             code: refs(&[("aa", 1)]),
             blocks: vec![
                 Block {
-                    kind: BlockKind::Code(Named::new(Some("aa"), 1)),
+                    kind: BlockKind::Code(Named::WithName { name: "aa", index: 1 }),
                     lines: vec!["bb", "\\ //"]
                 }
             ],
@@ -1810,7 +1810,7 @@ use crate::parse::{common::*, block_fragmentation::{FlatLexedProject, Block, Blo
             formulas: refs(&[("aa", 1)]),
             blocks: vec![
                 Block {
-                    kind: BlockKind::Formula(Named::new(Some("aa"), 1)),
+                    kind: BlockKind::Formula(Named::WithName { name: "aa", index: 1 }),
                     lines: vec!["bb", "\\ $"]
                 }
             ],
@@ -2010,7 +2010,7 @@ use crate::parse::{common::*, block_fragmentation::{FlatLexedProject, Block, Blo
                     lines: vec!["\\. aa"]
                 },
                 Block {
-                    kind: BlockKind::Image(ImageKind { named: Named {name: Some("cc"), index: 1}, scale: 100}),
+                    kind: BlockKind::Image(ImageKind { named: Named::WithName { name: "cc", index: 1 }, scale: 100}),
                     lines: vec!["bb"]
                 },
                 Block {
@@ -2035,7 +2035,7 @@ use crate::parse::{common::*, block_fragmentation::{FlatLexedProject, Block, Blo
                     lines: vec!["\\. aa"]
                 },
                 Block {
-                    kind: BlockKind::Code(Named::new(Some("bb"), 1)),
+                    kind: BlockKind::Code(Named::WithName { name: "bb", index: 1 }),
                     lines: vec!["cc"]
                 },
                 Block {
@@ -2060,7 +2060,7 @@ use crate::parse::{common::*, block_fragmentation::{FlatLexedProject, Block, Blo
                     lines: vec!["\\. aa"]
                 },
                 Block {
-                    kind: BlockKind::Table(Named::new(Some("tt"), 1)),
+                    kind: BlockKind::Table(Named::WithName { name: "tt", index: 1 }),
                     lines: vec!["/bb/", "\\№-", "/cc/"]
                 },
                 Block {
@@ -2081,7 +2081,7 @@ use crate::parse::{common::*, block_fragmentation::{FlatLexedProject, Block, Blo
             images: refs(&[("bb", 1)]),
             blocks: vec![
                 Block {
-                    kind: BlockKind::Image(ImageKind { named: Named {name: Some("bb"), index: 1}, scale: 100}),
+                    kind: BlockKind::Image(ImageKind { named: Named::WithName { name: "bb", index: 1 }, scale: 100}),
                     lines: vec!["aa"]
                 }
             ],
@@ -2096,7 +2096,7 @@ use crate::parse::{common::*, block_fragmentation::{FlatLexedProject, Block, Blo
         let out = split_blocks(source);
         let expected = project(vec![
             Block {
-                kind: BlockKind::Image(ImageKind { named: Named {name: None, index: 0}, scale: 100}),
+                kind: BlockKind::Image(ImageKind { named: Named::Anonymous, scale: 100}),
                 lines: vec!["aa"]
             }
         ]);
@@ -2111,7 +2111,7 @@ use crate::parse::{common::*, block_fragmentation::{FlatLexedProject, Block, Blo
             images: refs(&[("bb", 1)]),
             blocks: vec![
                 Block {
-                    kind: BlockKind::Image(ImageKind { named: Named {name: Some("bb"), index: 1}, scale: 1}),
+                    kind: BlockKind::Image(ImageKind { named: Named::WithName { name: "bb", index: 1 }, scale: 1}),
                     lines: vec!["aa"]
                 }
             ],
@@ -2125,7 +2125,7 @@ use crate::parse::{common::*, block_fragmentation::{FlatLexedProject, Block, Blo
             images: refs(&[("bb", 1)]),
             blocks: vec![
                 Block {
-                    kind: BlockKind::Image(ImageKind { named: Named {name: Some("bb"), index: 1}, scale: 65535}),
+                    kind: BlockKind::Image(ImageKind { named: Named::WithName { name: "bb", index: 1 }, scale: 65535}),
                     lines: vec!["aa"]
                 }
             ],
@@ -2142,7 +2142,7 @@ use crate::parse::{common::*, block_fragmentation::{FlatLexedProject, Block, Blo
             images: refs(&[("bb", 1)]),
             blocks: vec![
                 Block {
-                    kind: BlockKind::Image(ImageKind { named: Named {name: Some("bb"), index: 1}, scale: 100}),
+                    kind: BlockKind::Image(ImageKind { named: Named::WithName { name: "bb", index: 1 }, scale: 100}),
                     lines: vec!["aa"]
                 }
             ],
@@ -2156,7 +2156,7 @@ use crate::parse::{common::*, block_fragmentation::{FlatLexedProject, Block, Blo
             images: refs(&[("bb", 1)]),
             blocks: vec![
                 Block {
-                    kind: BlockKind::Image(ImageKind { named: Named {name: Some("bb"), index: 1}, scale: 100}),
+                    kind: BlockKind::Image(ImageKind { named: Named::WithName { name: "bb", index: 1 }, scale: 100}),
                     lines: vec!["aa"]
                 }
             ],
@@ -2170,7 +2170,7 @@ use crate::parse::{common::*, block_fragmentation::{FlatLexedProject, Block, Blo
             images: refs(&[("bb", 1)]),
             blocks: vec![
                 Block {
-                    kind: BlockKind::Image(ImageKind { named: Named {name: Some("bb"), index: 1}, scale: 100}),
+                    kind: BlockKind::Image(ImageKind { named: Named::WithName { name: "bb", index: 1 }, scale: 100}),
                     lines: vec!["aa"]
                 }
             ],
@@ -2184,7 +2184,7 @@ use crate::parse::{common::*, block_fragmentation::{FlatLexedProject, Block, Blo
             images: refs(&[("bb", 1)]),
             blocks: vec![
                 Block {
-                    kind: BlockKind::Image(ImageKind { named: Named {name: Some("bb"), index: 1}, scale: 100}),
+                    kind: BlockKind::Image(ImageKind { named: Named::WithName { name: "bb", index: 1 }, scale: 100}),
                     lines: vec!["aa"]
                 }
             ],
@@ -2253,7 +2253,7 @@ use crate::parse::{common::*, block_fragmentation::{FlatLexedProject, Block, Blo
             images: refs(&[("bb", 1)]),
             blocks: vec![
                 Block {
-                    kind: BlockKind::Image(ImageKind { named: Named {name: Some("bb"), index: 1}, scale: 100}),
+                    kind: BlockKind::Image(ImageKind { named: Named::WithName { name: "bb", index: 1 }, scale: 100}),
                     lines: vec!["aa"]
                 }
             ],
@@ -2274,7 +2274,7 @@ use crate::parse::{common::*, block_fragmentation::{FlatLexedProject, Block, Blo
                     lines: vec!["aa"]
                 },
                 Block {
-                    kind: BlockKind::Image(ImageKind { named: Named {name: Some("cc"), index: 1}, scale: 100}),
+                    kind: BlockKind::Image(ImageKind { named: Named::WithName { name: "cc", index: 1 }, scale: 100}),
                     lines: vec!["bb"]
                 },
                 Block {
@@ -2295,11 +2295,11 @@ use crate::parse::{common::*, block_fragmentation::{FlatLexedProject, Block, Blo
             images: refs(&[("bb", 1), ("dd", 2)]),
             blocks: vec![
                 Block {
-                    kind: BlockKind::Image(ImageKind { named: Named {name: Some("bb"), index: 1}, scale: 100}),
+                    kind: BlockKind::Image(ImageKind { named: Named::WithName { name: "bb", index: 1 }, scale: 100}),
                     lines: vec!["aa"]
                 },
                 Block {
-                    kind: BlockKind::Image(ImageKind { named: Named {name: Some("dd"), index: 2}, scale: 50}),
+                    kind: BlockKind::Image(ImageKind { named: Named::WithName { name: "dd", index: 2 }, scale: 50}),
                     lines: vec!["cc"]
                 }
             ],
@@ -2454,7 +2454,7 @@ use crate::parse::{common::*, block_fragmentation::{FlatLexedProject, Block, Blo
                     lines: vec!["aa"]
                 },
                 Block {
-                    kind: BlockKind::Code(Named::new(Some("bb"), 1)),
+                    kind: BlockKind::Code(Named::WithName { name: "bb", index: 1 }),
                     lines: vec!["cc"]
                 }
             ],
@@ -2492,7 +2492,7 @@ use crate::parse::{common::*, block_fragmentation::{FlatLexedProject, Block, Blo
             formulas: refs(&[("aa", 1)]),
             blocks: vec![
                 Block {
-                    kind: BlockKind::Formula(Named::new(Some("aa"), 1)),
+                    kind: BlockKind::Formula(Named::WithName { name: "aa", index: 1 }),
                     lines: vec![]
                 }
             ],
@@ -2509,7 +2509,7 @@ use crate::parse::{common::*, block_fragmentation::{FlatLexedProject, Block, Blo
             formulas: refs(&[("aa bb", 1)]),
             blocks: vec![
                 Block {
-                    kind: BlockKind::Formula(Named::new(Some("aa bb"), 1)),
+                    kind: BlockKind::Formula(Named::WithName { name: "aa bb", index: 1 }),
                     lines: vec!["cc"]
                 }
             ],
@@ -2526,7 +2526,7 @@ use crate::parse::{common::*, block_fragmentation::{FlatLexedProject, Block, Blo
             formulas: refs(&[("aa", 1)]),
             blocks: vec![
                 Block {
-                    kind: BlockKind::Formula(Named::new(Some("aa"), 1)),
+                    kind: BlockKind::Formula(Named::WithName { name: "aa", index: 1 }),
                     lines: vec!["\\// bb"]
                 }
             ],
@@ -2570,7 +2570,7 @@ use crate::parse::{common::*, block_fragmentation::{FlatLexedProject, Block, Blo
             code: refs(&[("aa", 1)]),
             blocks: vec![
                 Block {
-                    kind: BlockKind::Code(Named::new(Some("aa"), 1)),
+                    kind: BlockKind::Code(Named::WithName { name: "aa", index: 1 }),
                     lines: vec![]
                 }
             ],
@@ -2587,7 +2587,7 @@ use crate::parse::{common::*, block_fragmentation::{FlatLexedProject, Block, Blo
             code: refs(&[("aa bb", 1)]),
             blocks: vec![
                 Block {
-                    kind: BlockKind::Code(Named::new(Some("aa bb"), 1)),
+                    kind: BlockKind::Code(Named::WithName { name: "aa bb", index: 1 }),
                     lines: vec!["cc"]
                 }
             ],
@@ -2617,7 +2617,7 @@ use crate::parse::{common::*, block_fragmentation::{FlatLexedProject, Block, Blo
             code: refs(&[("aa", 1)]),
             blocks: vec![
                 Block {
-                    kind: BlockKind::Code(Named::new(Some("aa"), 1)),
+                    kind: BlockKind::Code(Named::WithName { name: "aa", index: 1 }),
                     lines: vec!["\\+ bb", "\\\"", "\\$ cc", "\\$", "\\№ dd", "\\. ee", "\\**1 ff", "\\(gg, hh)"]
                 }
             ],
@@ -2634,7 +2634,7 @@ use crate::parse::{common::*, block_fragmentation::{FlatLexedProject, Block, Blo
             code: refs(&[("aa", 1)]),
             blocks: vec![
                 Block {
-                    kind: BlockKind::Code(Named::new(Some("aa"), 1)),
+                    kind: BlockKind::Code(Named::WithName { name: "aa", index: 1 }),
                     lines: vec!["\\$ bb", "cc"]
                 }
             ],
@@ -2651,7 +2651,7 @@ use crate::parse::{common::*, block_fragmentation::{FlatLexedProject, Block, Blo
             code: refs(&[("aa", 1)]),
             blocks: vec![
                 Block {
-                    kind: BlockKind::Code(Named::new(Some("aa"), 1)),
+                    kind: BlockKind::Code(Named::WithName { name: "aa", index: 1 }),
                     lines: vec!["bb", "", "cc"]
                 }
             ],
@@ -2669,7 +2669,7 @@ use crate::parse::{common::*, block_fragmentation::{FlatLexedProject, Block, Blo
             tables: refs(&[("tt", 1)]),
             blocks: vec![
                 Block {
-                    kind: BlockKind::Table(Named::new(Some("tt"), 1)),
+                    kind: BlockKind::Table(Named::WithName { name: "tt", index: 1 }),
                     lines: vec!["/aa/bb/", "\\№-", "/cc/dd/"]
                 }
             ],
@@ -2686,7 +2686,7 @@ use crate::parse::{common::*, block_fragmentation::{FlatLexedProject, Block, Blo
             tables: refs(&[("tt", 1)]),
             blocks: vec![
                 Block {
-                    kind: BlockKind::Table(Named::new(Some("tt"), 1)),
+                    kind: BlockKind::Table(Named::WithName { name: "tt", index: 1 }),
                     lines: vec!["/aa/bb/", "/cc/dd/", "\\№- Л / П", "/ee/ff/"]
                 }
             ],
@@ -2703,7 +2703,7 @@ use crate::parse::{common::*, block_fragmentation::{FlatLexedProject, Block, Blo
             tables: refs(&[("tt", 1)]),
             blocks: vec![
                 Block {
-                    kind: BlockKind::Table(Named::new(Some("tt"), 1)),
+                    kind: BlockKind::Table(Named::WithName { name: "tt", index: 1 }),
                     lines: vec!["/aa/bb/", "\\№-"]
                 }
             ],
@@ -2718,7 +2718,7 @@ use crate::parse::{common::*, block_fragmentation::{FlatLexedProject, Block, Blo
         let out = split_blocks(source);
         let expected = project(vec![
             Block {
-                kind: BlockKind::Table(Named::none()),
+                kind: BlockKind::Table(Named::Anonymous),
                 lines: vec!["/aa/", "\\№-", "/bb/"]
             }
         ]);
@@ -2733,7 +2733,7 @@ use crate::parse::{common::*, block_fragmentation::{FlatLexedProject, Block, Blo
             tables: refs(&[("tt", 1)]),
             blocks: vec![
                 Block {
-                    kind: BlockKind::Table(Named::new(Some("tt"), 1)),
+                    kind: BlockKind::Table(Named::WithName { name: "tt", index: 1 }),
                     lines: vec!["/aa/bb/", "\\№- Л", "/cc/dd/"]
                 }
             ],
@@ -2750,7 +2750,7 @@ use crate::parse::{common::*, block_fragmentation::{FlatLexedProject, Block, Blo
             tables: refs(&[("tt", 1)]),
             blocks: vec![
                 Block {
-                    kind: BlockKind::Table(Named::new(Some("tt"), 1)),
+                    kind: BlockKind::Table(Named::WithName { name: "tt", index: 1 }),
                     lines: vec!["/aa/", "\\№-", "/bb/"]
                 }
             ],
@@ -2914,7 +2914,7 @@ use crate::parse::{common::*, block_fragmentation::{FlatLexedProject, Block, Blo
                     lines: vec!["\\№ Неполная таблица", "/ Заголовок / Заголовок /"]
                 },
                 Block {
-                    kind: BlockKind::Table(Named::new(Some("Новая таблица"), 1)),
+                    kind: BlockKind::Table(Named::WithName { name: "Новая таблица", index: 1 }),
                     lines: vec!["/ Заголовок / Заголовок /", "\\№-", "/ ячейка / ячейка /"]
                 }
             ],
@@ -2935,7 +2935,7 @@ use crate::parse::{common::*, block_fragmentation::{FlatLexedProject, Block, Blo
                     lines: vec!["aa"]
                 },
                 Block {
-                    kind: BlockKind::Table(Named::new(Some("tt"), 1)),
+                    kind: BlockKind::Table(Named::WithName { name: "tt", index: 1 }),
                     lines: vec!["/bb/", "\\№-", "/cc/"]
                 },
                 Block {
@@ -2956,11 +2956,11 @@ use crate::parse::{common::*, block_fragmentation::{FlatLexedProject, Block, Blo
             tables: refs(&[("tt", 1), ("uu", 2)]),
             blocks: vec![
                 Block {
-                    kind: BlockKind::Table(Named::new(Some("tt"), 1)),
+                    kind: BlockKind::Table(Named::WithName { name: "tt", index: 1 }),
                     lines: vec!["/aa/", "\\№-", "/bb/"]
                 },
                 Block {
-                    kind: BlockKind::Table(Named::new(Some("uu"), 2)),
+                    kind: BlockKind::Table(Named::WithName { name: "uu", index: 2 }),
                     lines: vec!["/cc/", "\\№-", "/dd/"]
                 }
             ],

@@ -5,20 +5,20 @@ const FILE_EXTENSIONS: &[&str] = &["rush"];
 
 
 #[derive(Default, Debug, PartialEq)]
-pub(crate) struct OuterLinks {
+pub(crate) struct GlobalProject {
     pub(crate) images: HashMap<String, PathBuf>,
     pub(crate) files: HashMap<String, PathBuf>
 }
 
-impl OuterLinks {
-    pub fn build_index(root: &Path) -> io::Result<OuterLinks> {
-        let mut project = OuterLinks::default();
+impl GlobalProject {
+    pub fn build_index(root: &Path) -> io::Result<GlobalProject> {
+        let mut project = GlobalProject::default();
         walk(root, root, &mut project)?;
         Ok(project)
     }
 }
 
-fn walk(root: &Path, dir: &Path, index: &mut OuterLinks) -> io::Result<()> {
+fn walk(root: &Path, dir: &Path, index: &mut GlobalProject) -> io::Result<()> {
     for entry in fs::read_dir(dir)? {
         let entry = entry?; 
         let path = entry.path();
