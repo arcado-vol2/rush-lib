@@ -1,28 +1,95 @@
 use std::{collections::{HashMap, HashSet}, vec};
 use std::borrow::Cow;
-use crate::parse::{lexemas::*, line_parse::clear_name_attribute};
+use crate::parse::{lexemas::*, line_parse::clear_name_attribute, common::*};
+
+
+
+#[derive(PartialEq, Debug)]
+pub(crate) enum BlockKind<'a> {
+    Paragraph,
+    List,
+    Table(Named<'a>),
+    Header(u8),
+    Comment,
+    Formula(Named<'a>),
+    Code(Named<'a>),
+    Image(ImageKind<'a>),
+    Note(u16)
+}
+
+#[derive(Debug, PartialEq)]
+pub(crate) struct Block<'a> {
+    pub(crate) kind: BlockKind<'a>,
+    pub(crate) lines: Vec<&'a str>,
+}
+
+
+
+
+#[derive(Debug, PartialEq)]
+struct NamedLinkable<'a> {
+    counter: u16,
+    data: HashMap<Cow<'a, str>, u16>
+}
+impl<'a> NamedLinkable<'a> {
+    fn register(&mut self, name: Cow<'a, str>) -> u16 {
+        self.counter+=1;
+        *self.data.entry(name).or_insert(self.counter)
+    }
+}
+
+impl<'a> Default for NamedLinkable<'a> {
+    fn default() -> Self {
+        Self { counter: 0, data: HashMap::new() }
+    }
+}
 
 #[derive(Debug, PartialEq)]
 pub(crate) struct FlatLexedProject<'a> {
     pub(crate) notes: HashSet<u16>,
 
-    pub(crate) code: HashMap<Cow<'a, str>, u16>,
-    pub(crate) formulas: HashMap<Cow<'a, str>, u16>,
-    pub(crate) images: HashMap<Cow<'a, str>, u16>,
-    pub(crate) tables: HashMap<Cow<'a, str>, u16>,
+    pub(crate) code: NamedLinkable<'a>,
+    pub(crate) formulas: NamedLinkable<'a>,
+    pub(crate) images: NamedLinkable<'a>,
+    pub(crate) tables: NamedLinkable<'a>,
    
     pub(crate) blocks: Vec<Block<'a>>
 }
 
-impl FlatLexedProject<'_> {
-    fn resolve(&self, kind: RefKind, name: &str) -> Option<u16> {
-        let map = match kind {
-            RefKind::Formula => &self.formulas,
+impl<'a> FlatLexedProject<'a> {
+    fn named_linkable_mut(&mut self, kind: RefKind) -> &mut NamedLinkable<'a> {
+        match kind {
+            RefKind::Code => &mut self.code,
+            RefKind::Formula => &mut self.formulas,
+            RefKind::Image => &mut self.images,
+            RefKind::Table => &mut self.tables
+        }
+    }
+
+    fn named_linkable(&self, kind: RefKind) -> &NamedLinkable<'a> {
+        match kind {
             RefKind::Code => &self.code,
+            RefKind::Formula => &self.formulas,
             RefKind::Image => &self.images,
             RefKind::Table => &self.tables
-        };
-        map.get(name).copied()
+        }
+    }
+
+  
+    fn register_named(&mut self, kind: RefKind, raw_name: &'a str) -> Named<'a> {
+        let linkable = self.named_linkable_mut(kind);
+        match resolve_name(raw_name) {
+            Some(name) if linkable.counter < u16::MAX => {
+                let id = linkable.register(clear_name_attribute(name));
+                Named::new(Some(name), id)
+            },
+            _ => Named::none()
+        }
+    }
+
+    fn resolve(&self, kind: RefKind, name: &str) -> Option<u16> {
+        let map = self.named_linkable(kind);
+        map.data.get(name).copied()
     }
 
     fn has_note(&self, n: u16) -> bool {
@@ -30,16 +97,14 @@ impl FlatLexedProject<'_> {
     }
 }
 
-
-
 impl<'a> Default for FlatLexedProject<'a> {
     fn default() -> Self {
         Self {
             notes: HashSet::new(),
-            tables: HashMap::new(),
-            images: HashMap::new(),
-            code: HashMap::new(),
-            formulas: HashMap::new(),
+            tables: NamedLinkable::default(),
+            images: NamedLinkable::default(),
+            code: NamedLinkable::default(),
+            formulas: NamedLinkable::default(),
             blocks: Vec::new() 
         }
     }
@@ -229,12 +294,7 @@ fn resolve_name<'a>(name_line: &'a str) -> Option<&'a str> {
 }
 
 
-struct Counters{
-    tables: u16,
-    images: u16,
-    formulas: u16,
-    codes: u16
-}
+
 
 fn split_blocks<'a>(source: &'a str) -> FlatLexedProject<'a> {
     let source = source.strip_prefix('\u{FEFF}').unwrap_or(source);
@@ -244,12 +304,6 @@ fn split_blocks<'a>(source: &'a str) -> FlatLexedProject<'a> {
 
     let mut current: usize = 0;
     let mut inner_block = OpenBlockKind::None;
-    let mut counters = Counters {
-        tables: 0,
-        images: 0,
-        formulas: 0,
-        codes: 0
-    };
     fn flush_par<'a>(out: &mut Vec<Block<'a>>, line: &'a str, par_is_open: &mut bool) {
          if *par_is_open {
             merge_flush(out, line);
@@ -274,17 +328,9 @@ fn split_blocks<'a>(source: &'a str) -> FlatLexedProject<'a> {
                         flush(&mut project.blocks, Some(line.thinned), BlockKind::Header(l), &mut par_is_open);
                     },
                     LineKind::CodeOpen => {
-                        println!("I in code open");
                         if search_for_pair(&lines, &current, Some(LineKind::CodeOpen), LineKind::CodeClose) {
-                            println!("founded pair");
-                            if let Some(name) = resolve_name(line.thinned) && counters.codes < u16::MAX{
-                                let cleaned_name = clear_name_attribute(name);
-                                counters.codes+=1;
-                                project.code.entry(cleaned_name).or_insert(counters.codes);
-                                flush(&mut project.blocks, None, BlockKind::Code(Named::new(Some(name), counters.codes)), &mut par_is_open);
-                            } else {
-                                flush(&mut project.blocks, None, BlockKind::Code(Named::none()), &mut par_is_open);
-                            }
+                            let named = project.register_named(RefKind::Code, line.thinned);
+                            flush(&mut project.blocks, None, BlockKind::Code(named), &mut par_is_open);
                             inner_block = OpenBlockKind::Code;
                         } else {
                             inner_block = OpenBlockKind::None;
@@ -300,14 +346,8 @@ fn split_blocks<'a>(source: &'a str) -> FlatLexedProject<'a> {
                     },
                     LineKind::FormulaOpen => {
                         if search_for_pair(&lines, &current, Some(LineKind::FormulaOpen), LineKind::FormulaClose) {
-                            if let Some(name) = resolve_name(line.thinned) && counters.formulas < u16::MAX {
-                                let cleaned_name = clear_name_attribute(name);
-                                counters.formulas+=1;
-                                project.formulas.entry(cleaned_name).or_insert(counters.formulas);
-                                flush(&mut project.blocks, None, BlockKind::Formula(Named::new(Some(name), counters.formulas)), &mut par_is_open);
-                            } else {
-                                flush(&mut project.blocks, None, BlockKind::Formula(Named::none()), &mut par_is_open);
-                            }
+                            let named = project.register_named(RefKind::Formula, line.thinned);
+                            flush(&mut project.blocks, None, BlockKind::Formula(named), &mut par_is_open);
                             inner_block = OpenBlockKind::Formula;
                         } else {
                             inner_block = OpenBlockKind::None;
@@ -317,14 +357,8 @@ fn split_blocks<'a>(source: &'a str) -> FlatLexedProject<'a> {
                         let mut parts = line.thinned.split(IMG_SEP);
                         let path = parts.next().unwrap().trim_matches(|c| is_blank(c));
                         let name = parts.next().unwrap().trim_matches(|c| is_blank(c));
-                        if let Some(name) = resolve_name(name) && counters.images < u16::MAX {
-                            let cleaned_name = clear_name_attribute(name);
-                            counters.images+=1;
-                            project.images.entry(cleaned_name).or_insert(counters.images);
-                            flush(&mut project.blocks, Some(path), BlockKind::Image(ImageKind {scale, label: Some(name), index: counters.images}), &mut par_is_open);
-                        } else {
-                            flush(&mut project.blocks, Some(path), BlockKind::Image(ImageKind {scale, label: None, index: 0}), &mut par_is_open);
-                        }
+                        let named = project.register_named(RefKind::Image, name);
+                        flush(&mut project.blocks, Some(path), BlockKind::Image(ImageKind {scale, named}), &mut par_is_open);
                     },
                     LineKind::List => {
                         flush(&mut project.blocks, Some(line.formated),BlockKind::List, &mut par_is_open);
@@ -373,14 +407,8 @@ fn split_blocks<'a>(source: &'a str) -> FlatLexedProject<'a> {
                                         inner_block = OpenBlockKind::None;
                                         break;
                                     } else {
-                                        if let Some(name) = resolve_name(line.thinned) && counters.tables < u16::MAX {
-                                            let cleaned_name = clear_name_attribute(name);
-                                            counters.tables+=1;
-                                            project.tables.entry(cleaned_name).or_insert(counters.tables);
-                                            flush(&mut project.blocks, None, BlockKind::Table(Named::new(Some(name), counters.tables)), &mut par_is_open);
-                                        } else {
-                                            flush(&mut project.blocks, None, BlockKind::Table(Named::none()), &mut par_is_open);
-                                        }
+                                        let named = project.register_named(RefKind::Table, line.thinned);
+                                        flush(&mut project.blocks, None, BlockKind::Table(named), &mut par_is_open);
                                         inner_block = OpenBlockKind::Table;
                                         break;
                                     }
@@ -446,16 +474,19 @@ fn split_blocks<'a>(source: &'a str) -> FlatLexedProject<'a> {
 
 
 #[cfg(test)] mod test {
-    use std::{borrow::Cow, collections::{HashMap, HashSet}, vec};
+    use std::{borrow::Cow, collections::HashSet, vec};
 
-use crate::parse::{block_fragmentation::{FlatLexedProject, split_blocks}, lexemas::{Block, BlockKind::{self, Header}, ImageKind, Named}};
+use crate::parse::{common::*, block_fragmentation::{FlatLexedProject, Block, BlockKind::{self, Header}, ImageKind, Named, NamedLinkable, split_blocks}};
 
     fn project<'a>(blocks: Vec<Block<'a>>) -> FlatLexedProject<'a> {
         FlatLexedProject { blocks, ..Default::default() }
     }
 
-    fn refs<'a>(items: &[(&'a str, u16)]) -> HashMap<Cow<'a, str>, u16> {
-        items.iter().map(|&(name, index)| (Cow::Borrowed(name), index)).collect()
+    fn refs<'a>(items: &[(&'a str, u16)]) -> NamedLinkable<'a> {
+        NamedLinkable {
+            counter: items.iter().map(|&(_, index)| index).max().unwrap_or(0),
+            data: items.iter().map(|&(name, index)| (Cow::Borrowed(name), index)).collect()
+        }
     }
 
     #[test]
@@ -1474,7 +1505,7 @@ use crate::parse::{block_fragmentation::{FlatLexedProject, split_blocks}, lexema
             images: refs(&[("bb", 1)]),
             blocks: vec![
                 Block {
-                    kind: BlockKind::Image(ImageKind { label: Some("bb"), scale: 110, index: 1 }),
+                    kind: BlockKind::Image(ImageKind {named: Named {name: Some("bb"), index: 1}, scale: 110}),
                     lines: vec!["aa"]
                 }
             ],
@@ -1490,7 +1521,7 @@ use crate::parse::{block_fragmentation::{FlatLexedProject, split_blocks}, lexema
         let expected = FlatLexedProject {
             images: refs(&[("bb", 1)]),
             blocks: vec![
-                Block { kind: BlockKind::Image(ImageKind { label: Some("bb"), scale: 100, index: 1 }), lines: vec!["aa"] }
+                Block { kind: BlockKind::Image(ImageKind { named: Named {name: Some("bb"), index: 1}, scale: 100}), lines: vec!["aa"] }
             ],
             ..Default::default()
         };
@@ -1582,8 +1613,6 @@ use crate::parse::{block_fragmentation::{FlatLexedProject, split_blocks}, lexema
         assert_eq!(out, expected);
     }
 
-    // ===== General =====
-
     #[test]
     fn block_check_empty_bom_and_blank_lines() {
         let source = "\u{FEFF}\n  \n\t";
@@ -1664,8 +1693,6 @@ use crate::parse::{block_fragmentation::{FlatLexedProject, split_blocks}, lexema
         ]);
         assert_eq!(out, expected);
     }
-
-    // ===== Space between \ and tag =====
 
     #[test]
     fn block_check_header_p_space_after_mark() {
@@ -1805,7 +1832,6 @@ use crate::parse::{block_fragmentation::{FlatLexedProject, split_blocks}, lexema
         assert_eq!(out, expected);
     }
 
-    // ===== Paragraph =====
 
     #[test]
     fn block_check_header_p_empty_parts_dropped() {
@@ -1827,8 +1853,6 @@ use crate::parse::{block_fragmentation::{FlatLexedProject, split_blocks}, lexema
         ]);
         assert_eq!(out, expected);
     }
-
-    // ===== Header =====
 
     #[test]
     fn block_check_header_p_only_spaces_after_tag() {
@@ -1904,7 +1928,6 @@ use crate::parse::{block_fragmentation::{FlatLexedProject, split_blocks}, lexema
         assert_eq!(out, expected);
     }
 
-    // ===== List =====
 
     #[test]
     fn block_check_list_deep_levels() {
@@ -1987,7 +2010,7 @@ use crate::parse::{block_fragmentation::{FlatLexedProject, split_blocks}, lexema
                     lines: vec!["\\. aa"]
                 },
                 Block {
-                    kind: BlockKind::Image(ImageKind { label: Some("cc"), scale: 100, index: 1 }),
+                    kind: BlockKind::Image(ImageKind { named: Named {name: Some("cc"), index: 1}, scale: 100}),
                     lines: vec!["bb"]
                 },
                 Block {
@@ -2050,8 +2073,6 @@ use crate::parse::{block_fragmentation::{FlatLexedProject, split_blocks}, lexema
         assert_eq!(out, expected);
     }
 
-    // ===== Image =====
-
     #[test]
     fn block_check_image_no_scale() {
         let source = "\\(aa, bb)";
@@ -2060,7 +2081,7 @@ use crate::parse::{block_fragmentation::{FlatLexedProject, split_blocks}, lexema
             images: refs(&[("bb", 1)]),
             blocks: vec![
                 Block {
-                    kind: BlockKind::Image(ImageKind { label: Some("bb"), scale: 100, index: 1 }),
+                    kind: BlockKind::Image(ImageKind { named: Named {name: Some("bb"), index: 1}, scale: 100}),
                     lines: vec!["aa"]
                 }
             ],
@@ -2075,7 +2096,7 @@ use crate::parse::{block_fragmentation::{FlatLexedProject, split_blocks}, lexema
         let out = split_blocks(source);
         let expected = project(vec![
             Block {
-                kind: BlockKind::Image(ImageKind { label: None, scale: 100, index: 0 }),
+                kind: BlockKind::Image(ImageKind { named: Named {name: None, index: 0}, scale: 100}),
                 lines: vec!["aa"]
             }
         ]);
@@ -2090,7 +2111,7 @@ use crate::parse::{block_fragmentation::{FlatLexedProject, split_blocks}, lexema
             images: refs(&[("bb", 1)]),
             blocks: vec![
                 Block {
-                    kind: BlockKind::Image(ImageKind { label: Some("bb"), scale: 1, index: 1 }),
+                    kind: BlockKind::Image(ImageKind { named: Named {name: Some("bb"), index: 1}, scale: 1}),
                     lines: vec!["aa"]
                 }
             ],
@@ -2104,7 +2125,7 @@ use crate::parse::{block_fragmentation::{FlatLexedProject, split_blocks}, lexema
             images: refs(&[("bb", 1)]),
             blocks: vec![
                 Block {
-                    kind: BlockKind::Image(ImageKind { label: Some("bb"), scale: 65535, index: 1 }),
+                    kind: BlockKind::Image(ImageKind { named: Named {name: Some("bb"), index: 1}, scale: 65535}),
                     lines: vec!["aa"]
                 }
             ],
@@ -2121,7 +2142,7 @@ use crate::parse::{block_fragmentation::{FlatLexedProject, split_blocks}, lexema
             images: refs(&[("bb", 1)]),
             blocks: vec![
                 Block {
-                    kind: BlockKind::Image(ImageKind { label: Some("bb"), scale: 100, index: 1 }),
+                    kind: BlockKind::Image(ImageKind { named: Named {name: Some("bb"), index: 1}, scale: 100}),
                     lines: vec!["aa"]
                 }
             ],
@@ -2135,7 +2156,7 @@ use crate::parse::{block_fragmentation::{FlatLexedProject, split_blocks}, lexema
             images: refs(&[("bb", 1)]),
             blocks: vec![
                 Block {
-                    kind: BlockKind::Image(ImageKind { label: Some("bb"), scale: 100, index: 1 }),
+                    kind: BlockKind::Image(ImageKind { named: Named {name: Some("bb"), index: 1}, scale: 100}),
                     lines: vec!["aa"]
                 }
             ],
@@ -2149,7 +2170,7 @@ use crate::parse::{block_fragmentation::{FlatLexedProject, split_blocks}, lexema
             images: refs(&[("bb", 1)]),
             blocks: vec![
                 Block {
-                    kind: BlockKind::Image(ImageKind { label: Some("bb"), scale: 100, index: 1 }),
+                    kind: BlockKind::Image(ImageKind { named: Named {name: Some("bb"), index: 1}, scale: 100}),
                     lines: vec!["aa"]
                 }
             ],
@@ -2163,7 +2184,7 @@ use crate::parse::{block_fragmentation::{FlatLexedProject, split_blocks}, lexema
             images: refs(&[("bb", 1)]),
             blocks: vec![
                 Block {
-                    kind: BlockKind::Image(ImageKind { label: Some("bb"), scale: 100, index: 1 }),
+                    kind: BlockKind::Image(ImageKind { named: Named {name: Some("bb"), index: 1}, scale: 100}),
                     lines: vec!["aa"]
                 }
             ],
@@ -2232,7 +2253,7 @@ use crate::parse::{block_fragmentation::{FlatLexedProject, split_blocks}, lexema
             images: refs(&[("bb", 1)]),
             blocks: vec![
                 Block {
-                    kind: BlockKind::Image(ImageKind { label: Some("bb"), scale: 100, index: 1 }),
+                    kind: BlockKind::Image(ImageKind { named: Named {name: Some("bb"), index: 1}, scale: 100}),
                     lines: vec!["aa"]
                 }
             ],
@@ -2253,7 +2274,7 @@ use crate::parse::{block_fragmentation::{FlatLexedProject, split_blocks}, lexema
                     lines: vec!["aa"]
                 },
                 Block {
-                    kind: BlockKind::Image(ImageKind { label: Some("cc"), scale: 100, index: 1 }),
+                    kind: BlockKind::Image(ImageKind { named: Named {name: Some("cc"), index: 1}, scale: 100}),
                     lines: vec!["bb"]
                 },
                 Block {
@@ -2274,11 +2295,11 @@ use crate::parse::{block_fragmentation::{FlatLexedProject, split_blocks}, lexema
             images: refs(&[("bb", 1), ("dd", 2)]),
             blocks: vec![
                 Block {
-                    kind: BlockKind::Image(ImageKind { label: Some("bb"), scale: 100, index: 1 }),
+                    kind: BlockKind::Image(ImageKind { named: Named {name: Some("bb"), index: 1}, scale: 100}),
                     lines: vec!["aa"]
                 },
                 Block {
-                    kind: BlockKind::Image(ImageKind { label: Some("dd"), scale: 50, index: 2 }),
+                    kind: BlockKind::Image(ImageKind { named: Named {name: Some("dd"), index: 2}, scale: 50}),
                     lines: vec!["cc"]
                 }
             ],
@@ -2287,7 +2308,6 @@ use crate::parse::{block_fragmentation::{FlatLexedProject, split_blocks}, lexema
         assert_eq!(out, expected);
     }
 
-    // ===== Note =====
 
     #[test]
     fn block_check_note_anon() {
@@ -2374,7 +2394,6 @@ use crate::parse::{block_fragmentation::{FlatLexedProject, split_blocks}, lexema
         assert_eq!(out, expected);
     }
 
-    // ===== Comment =====
 
     #[test]
     fn block_check_comment_tag_with_text_inside() {
@@ -2465,8 +2484,6 @@ use crate::parse::{block_fragmentation::{FlatLexedProject, split_blocks}, lexema
         assert_eq!(out, expected);
     }
 
-    // ===== Formula =====
-
     #[test]
     fn block_check_formula_empty() {
         let source = "\\$ aa\n\\$";
@@ -2544,7 +2561,6 @@ use crate::parse::{block_fragmentation::{FlatLexedProject, split_blocks}, lexema
         assert_eq!(out, expected);
     }
 
-    // ===== Code =====
 
     #[test]
     fn block_check_code_empty() {
@@ -2644,7 +2660,6 @@ use crate::parse::{block_fragmentation::{FlatLexedProject, split_blocks}, lexema
         assert_eq!(out, expected);
     }
 
-    // ===== Table =====
 
     #[test]
     fn block_check_table_no_format() {

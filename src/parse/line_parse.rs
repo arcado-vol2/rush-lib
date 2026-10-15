@@ -1,8 +1,9 @@
 use std::borrow::Cow;
+use std::iter::Peekable;
 use std::ops::AddAssign;
+use std::str::CharIndices;
 
-use crate::parse::lexemas::{BOLD, BYTE_SHIELD, COLOR, ITALIC, LBRACE, LINK, MARK, MONO, NOTE, RBRACE, RefKind, SHIELD, SMALL_E, SMALL_YO, SPACE, STRIKE, UNDER, ref_kind};
-
+use crate::parse::{lexemas::*, common::*};
 
 #[derive(Debug, PartialEq, Default, Clone)]
 struct Color {
@@ -143,7 +144,6 @@ enum InlineClearKind {
     Mono,
     Color(u32), 
 }
-
 pub(crate) fn clear_name_attribute<'a>(line: &'a str) -> Cow<'a, str> {
     let Some(first) = line.find(is_should_be_changed_on_name) else {
         return Cow::Borrowed(line);
@@ -209,11 +209,6 @@ pub(crate) fn clear_name_attribute<'a>(line: &'a str) -> Cow<'a, str> {
                             out.push(ch);
                             depth += 1;
                         },
-                        BOLD => push_closer(&mut braces_stack, &mut out, InlineClearKind::Bold, &ch),
-                        ITALIC => push_closer(&mut braces_stack, &mut out, InlineClearKind::Italic, &ch),
-                        MONO => push_closer(&mut braces_stack, &mut out, InlineClearKind::Mono, &ch),
-                        STRIKE => push_closer(&mut braces_stack, &mut out, InlineClearKind::Strike, &ch),
-                        UNDER => push_closer(&mut braces_stack, &mut out, InlineClearKind::Under, &ch),
                         RBRACE => {
                             depth = depth.saturating_sub(1);
                             let color = braces_stack.iter().rposition(|e| matches!(e, InlineClearKind::Color(_)));
@@ -223,6 +218,11 @@ pub(crate) fn clear_name_attribute<'a>(line: &'a str) -> Cow<'a, str> {
                             }
                         },
                         SMALL_YO => out.push(SMALL_E),
+                        BOLD => push_closer(&mut braces_stack, &mut out, InlineClearKind::Bold, &ch),
+                        ITALIC => push_closer(&mut braces_stack, &mut out, InlineClearKind::Italic, &ch),
+                        MONO => push_closer(&mut braces_stack, &mut out, InlineClearKind::Mono, &ch),
+                        STRIKE => push_closer(&mut braces_stack, &mut out, InlineClearKind::Strike, &ch),
+                        UNDER => push_closer(&mut braces_stack, &mut out, InlineClearKind::Under, &ch),
                         _ => out.push(ch)
                     }
                 }
@@ -331,15 +331,22 @@ impl<'a> PreparsedLines<'a> {
         }
     }
 
-    fn brace_char_to_mark(line: &'a str, ch: char) -> Mark<'a> {
-        let line = &line[ch.len_utf8()..];
-        match ch {
-            COLOR => {
-                let color = Color::from_unknown_string(line);
-                Mark::Color(color)
-            },
-            LINK => Mark::Link(line),
-            _ => unreachable!("only color an links can be here!")
+    fn color_head(line: &'a str, chars: &mut Peekable<CharIndices<'a>>, value_start: usize) -> Option<(Mark<'a>, usize)> {
+        let (brace_i, _) = chars.find(|&(_, c)| c == LBRACE)?;
+        let color = Color::from_unknown_string(&line[value_start..brace_i]);
+        Some((Mark::Color(color), brace_i + LBRACE.len_utf8()))
+    }
+
+    fn link_head(line: &'a str, chars: &mut Peekable<CharIndices<'a>>, value_start: usize) -> Option<(Mark<'a>, usize)> {
+        if line[value_start..].starts_with(QUOTES) {
+            chars.nth(1);
+            let link_start = value_start + QUOTES.len_utf8();
+            let (quote_i, _) = chars.find(|&(_, c)| c == QUOTES)?;
+            let (brace_i, _) = chars.next_if(|&(_, c)| c == LBRACE)?;
+            Some((Mark::Link(&line[link_start..quote_i]), brace_i + LBRACE.len_utf8()))
+        } else {
+            let (brace_i, _) = chars.find(|&(_, c)| c == LBRACE)?;
+            Some((Mark::Link(&line[value_start..brace_i]), brace_i + LBRACE.len_utf8()))
         }
     }
 
@@ -365,7 +372,6 @@ impl<'a> PreparsedLines<'a> {
     }
 
     fn new(lines: Vec<&'a str>) -> Self {
-        println!("PARSING: {:?}", lines);
         let mut out = Self {
             text: Vec::new(),
             style_ranges: Vec::new()
@@ -376,17 +382,20 @@ impl<'a> PreparsedLines<'a> {
             let mut byte_after_last_tag = 0;
             let mut brace_depth: u32 = 0;
             while let Some((i, ch)) = chars.next(){
-                println!("{}, {}", i, ch);
                 match ch {    
                     MARK => {
                         if let Some(&(next_i, next_ch)) = chars.peek() {
                             match next_ch {
                                 COLOR | LINK => {
-                                    match chars.find(|&(_, c)| c == LBRACE) {
-                                        Some((brace_i, i_ch)) => {
+                                    let value_start = next_i + next_ch.len_utf8();
+                                    let head = match next_ch {
+                                        COLOR => Self::color_head(line, &mut chars, value_start),
+                                        _ => Self::link_head(line, &mut chars, value_start),
+                                    };
+                                    match head {
+                                        Some((mark, after_brace)) => {
                                             Self::push_range_to_out(&mut out, line, byte_after_last_tag, i);
-                                            let mark = Self::brace_char_to_mark(&line[next_i..brace_i], next_ch);
-                                            byte_after_last_tag = brace_i + i_ch.len_utf8();
+                                            byte_after_last_tag = after_brace;
                                             open_stack.push(
                                                 Opened { mark, start: out.text.len(), brace_depth: Some(brace_depth)}
                                             );
@@ -454,7 +463,6 @@ impl<'a> PreparsedLines<'a> {
                         if let Some(opened) = Self::try_pop_stack(
                             &mut open_stack, |t| t.brace_depth == Some(brace_depth)
                         ) {
-                            println!("Depth is zero also color in stack: {opened:?}");
                             Self::push_range_to_out(&mut out, line, byte_after_last_tag, i);
                             byte_after_last_tag = i + ch.len_utf8();
                             out.style_ranges.push(
@@ -554,7 +562,7 @@ struct Style<'a> {
 
 
 #[derive(Debug)]
-struct Span<'a> {
+pub(crate) struct Span<'a> {
     text: Vec<InlineText<'a>>,
     style: Style<'a>
 }
@@ -571,12 +579,7 @@ impl<'a> Span<'a>{
 
 
 
-fn generate_spans<'a>(preparsed: PreparsedLines<'a>) -> Vec<Span<'a>> {
-    println!("Generate_spans:");
-    println!("{:?}", preparsed);
-    println!();
-    
-
+pub(crate) fn generate_spans<'a>(preparsed: PreparsedLines<'a>) -> Vec<Span<'a>> {
     let mut difs: Vec<StyleDiff> = vec![StyleDiff::default(); preparsed.text.len()];
     
     for range in preparsed.style_ranges {
@@ -649,7 +652,6 @@ fn generate_spans<'a>(preparsed: PreparsedLines<'a>) -> Vec<Span<'a>> {
         
     }
 
-    println!("out is {:?}", out);
 
     return out;
 }
@@ -661,17 +663,6 @@ fn generate_spans<'a>(preparsed: PreparsedLines<'a>) -> Vec<Span<'a>> {
 
     use crate::parse::line_parse::*;
 
-    #[test]
-    fn main() {
-        
-        let out = PreparsedLines::new(vec!["строка 1", "строка 2"]);
-        println!("---RES 1--");
-        println!("{out:?}");
-        println!();
-        let out = generate_spans(out);
-        println!("---RES 2---");
-        println!("{out:?}");
-    }
 
     fn check(input: &str, expected: &str) {
         assert_eq!(clear_name_attribute(input), expected);
@@ -855,6 +846,34 @@ fn generate_spans<'a>(preparsed: PreparsedLines<'a>) -> Vec<Span<'a>> {
             vec![s("x "), s("y"), s(" z"), Space],
             vec![r(Mark::Link("b.ru"), 1, 2), r(Mark::Link("a.ru"), 0, 3)]
         );
+    }
+
+    #[test]
+    fn check_line_preparsed_link_quoted() {
+        check_pre(
+            vec!["\\,\"www.link_with_braces.com/page(low)\"(текст)"],
+            vec![s("текст"), Space],
+            vec![r(Mark::Link("www.link_with_braces.com/page(low)"), 0, 1)]
+        );
+        check_pre(
+            vec!["до \\,\"a.ru/x)\"(y) после"],
+            vec![s("до "), s("y"), s(" после"), Space],
+            vec![r(Mark::Link("a.ru/x)"), 1, 2)]
+        );
+        check_pre(
+            vec!["\\,a.ru(x \\,\"b.ru/(1)\"(y) z)"],
+            vec![s("x "), s("y"), s(" z"), Space],
+            vec![r(Mark::Link("b.ru/(1)"), 1, 2), r(Mark::Link("a.ru"), 0, 3)]
+        );
+        check_pre(vec!["до \\,\"a.ru(x)"], vec![s("до "), Space], vec![]);
+        check_pre(vec!["до \\,\"a.ru\" после"], vec![s("до "), Space], vec![]);
+        check_pre(vec!["до \\,\"a.ru\" (x) после"], vec![s("до "), Space], vec![]);
+        check_pre(vec!["до \\,\"a.ru\"b(x) после"], vec![s("до "), Space], vec![]);
+    }
+
+    #[test]
+    fn check_line_spans_link_quoted() {
+        check_spans(vec!["\\,\"a.ru/(1)\"(x)"], vec![(vec![s("x")], Style { link: Some("a.ru/(1)"), ..plain() })]);
     }
 
     #[test]

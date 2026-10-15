@@ -1,4 +1,3 @@
-#![allow(dead_code)]
 pub(crate) const MARK: char = '\\';
 pub(crate) const TAB: char = '\t';
 pub(crate) const CR: char = '\r';
@@ -78,116 +77,14 @@ pub(crate)const NUMERIC_LIST_TAG: Tag = Tag::new(NUMERIC_LIST, 1);
 pub(crate)const ANON_NAME_TAG: Tag = Tag::new(ANON, 1);
 
 
-
-
 pub(crate) const NEW_LINE_BREAK: usize = 2;
 
-#[derive(PartialEq, Debug)]
-pub(crate) struct ImageKind<'a> {
-    pub(crate) label: Option<&'a str>,
-    pub(crate) scale: u16,
-    pub(crate) index: u16
-}
-#[derive(PartialEq, Debug)]
-pub(crate) struct Named<'a> {
-    name: Option<&'a str>,
-    index: u16
-}
-impl<'a> Named<'a> {
-    pub(crate) fn none() -> Self {
-        Self { name: None, index: 0 }
-    }
+pub(crate) const FORMULA_REF: char = 'ф';
+pub(crate) const TABLE_REF: char = 'т';
+pub(crate) const CODE_REF: char = 'л';
+pub(crate) const IMAGE_REF: char = 'р';
 
-    pub(crate) fn new(name: Option<&'a str>, index: u16) -> Self {
-        Self {name, index}
-    }
-}
 
-#[derive(PartialEq, Debug)]
-pub(crate) enum BlockKind<'a> {
-    Paragraph,
-    List,
-    Table(Named<'a>),
-    Header(u8),
-    Comment,
-    Formula(Named<'a>),
-    Code(Named<'a>),
-    Image(ImageKind<'a>),
-    Note(u16)
-}
-#[derive(Debug, PartialEq)]
-pub(crate) enum RefKind {
-    Formula,
-    Table,
-    Code,
-    Image
-}
 
-pub(crate) fn ref_kind(c: char) -> Option<RefKind> {
-    match c {
-        'ф' => Some(RefKind::Formula),
-        'т' => Some(RefKind::Table),
-        'л' => Some(RefKind::Code),
-        'р' => Some(RefKind::Image),
-        _ => None
-    }
-}
 
-#[derive(PartialEq, Debug)]
-pub(crate) enum LexemaKind {
-    Empty,
-    NewLine,
-    Name,
-    NumericList(u32),
-    BulletList(u32),
-    ImgStart,
-    ImgPath,
-    ImgName,
-    ImgSize,
-    ImgEnd,
-    NoteRef,
-    NoteDef,
-    CommentStart,
-    CommentEnd,
-    FormulaStart,
-    FormulaEnd,
-    CodeStart,
-    CodeEnd,
-    TableStart,
-    TableHeaderEnd,
-    TableSep,
-    TableMergeLeft,
-    TableMergeUp,
-    TableMergeLeftUp,
-    TableEnd,
-    BoldStart,
-    BoldEnd,
-    ItalicStart,
-    ItalicEnd,
-    StrikeStart,
-    StrikeEnd,
-    UnderlineStart,
-    UnderlineEnd,
-    MonoStart,
-    MonoEnd,
-    ColorStart,
-    ColorValue,
-    ColorEnd,
-    LinkStart,
-    LinkTarget,
-    LinkText,
-    LinkEnd,
-}
-
-#[derive(Debug)]
-pub(crate) struct Lexema<'a> {
-    pub(crate) kind: LexemaKind,
-    pub(crate) data: &'a str
-}
-
-#[derive(Debug, PartialEq)]
-pub(crate) struct Block<'a> {
-    pub(crate) kind: BlockKind<'a>,
-    pub(crate) lines: Vec<&'a str>,
-}
 
