@@ -28,7 +28,7 @@ pub(crate) struct Block<'a> {
 
 #[derive(Debug, PartialEq)]
 pub(crate) struct NamedLinkable<'a> {
-    pub(crate)  counter: u16,
+    pub(crate) counter: u16,
     pub(crate) data: HashMap<Cow<'a, str>, u16>
 }
 impl<'a> NamedLinkable<'a> {
@@ -45,18 +45,16 @@ impl<'a> Default for NamedLinkable<'a> {
 }
 
 #[derive(Debug, PartialEq)]
-pub(crate) struct FlatLexedProject<'a> {
-    pub(crate) notes: HashSet<u16>,
+pub(crate) struct InnerProjectLinks<'a> {
+    notes: HashSet<u16>,
 
-    pub(crate) code: NamedLinkable<'a>,
-    pub(crate) formulas: NamedLinkable<'a>,
-    pub(crate) images: NamedLinkable<'a>,
-    pub(crate) tables: NamedLinkable<'a>,
-   
-    pub(crate) blocks: Vec<Block<'a>>
+    code: NamedLinkable<'a>,
+    formulas: NamedLinkable<'a>,
+    images: NamedLinkable<'a>,
+    tables: NamedLinkable<'a>,
 }
 
-impl<'a> FlatLexedProject<'a> {
+impl <'a> InnerProjectLinks<'a> {
     fn named_linkable_mut(&mut self, kind: RefKind) -> &mut NamedLinkable<'a> {
         match kind {
             RefKind::Code => &mut self.code,
@@ -75,7 +73,6 @@ impl<'a> FlatLexedProject<'a> {
         }
     }
 
-  
     fn register_named(&mut self, kind: RefKind, raw_name: &'a str) -> Named<&'a str> {
         let linkable = self.named_linkable_mut(kind);
         match resolve_name(raw_name) {
@@ -87,17 +84,17 @@ impl<'a> FlatLexedProject<'a> {
         }
     }
 
-    fn resolve(&self, kind: RefKind, name: &str) -> Option<u16> {
+    pub(crate) fn resolve(&self, kind: RefKind, name: &str) -> Option<u16> {
         let map = self.named_linkable(kind);
         map.data.get(name).copied()
     }
 
-    fn has_note(&self, n: u16) -> bool {
+    pub(crate) fn has_note(&self, n: u16) -> bool {
         self.notes.contains(&n)
     }
 }
 
-impl<'a> Default for FlatLexedProject<'a> {
+impl<'a> Default for InnerProjectLinks<'a> {
     fn default() -> Self {
         Self {
             notes: HashSet::new(),
@@ -105,9 +102,15 @@ impl<'a> Default for FlatLexedProject<'a> {
             images: NamedLinkable::default(),
             code: NamedLinkable::default(),
             formulas: NamedLinkable::default(),
-            blocks: Vec::new() 
         }
     }
+}
+
+
+#[derive(Debug, PartialEq, Default)]
+pub(crate) struct FlatLexedProject<'a> {
+    pub(crate) links: InnerProjectLinks<'a>,
+    pub(crate) blocks: Vec<Block<'a>>
 }
 
 fn merge_flush<'a>(out: &mut Vec<Block<'a>>, line: &'a str) {
@@ -296,7 +299,7 @@ fn resolve_name<'a>(name_line: &'a str) -> Option<&'a str> {
 
 
 
-fn split_blocks<'a>(source: &'a str) -> FlatLexedProject<'a> {
+pub(crate) fn split_blocks<'a>(source: &'a str) -> FlatLexedProject<'a> {
     let source = source.strip_prefix('\u{FEFF}').unwrap_or(source);
     let mut project = FlatLexedProject::default();
     let mut par_is_open = false; 
@@ -329,7 +332,7 @@ fn split_blocks<'a>(source: &'a str) -> FlatLexedProject<'a> {
                     },
                     LineKind::CodeOpen => {
                         if search_for_pair(&lines, &current, Some(LineKind::CodeOpen), LineKind::CodeClose) {
-                            let named = project.register_named(RefKind::Code, line.thinned);
+                            let named = project.links.register_named(RefKind::Code, line.thinned);
                             flush(&mut project.blocks, None, BlockKind::Code(named), &mut par_is_open);
                             inner_block = OpenBlockKind::Code;
                         } else {
@@ -346,7 +349,7 @@ fn split_blocks<'a>(source: &'a str) -> FlatLexedProject<'a> {
                     },
                     LineKind::FormulaOpen => {
                         if search_for_pair(&lines, &current, Some(LineKind::FormulaOpen), LineKind::FormulaClose) {
-                            let named = project.register_named(RefKind::Formula, line.thinned);
+                            let named = project.links.register_named(RefKind::Formula, line.thinned);
                             flush(&mut project.blocks, None, BlockKind::Formula(named), &mut par_is_open);
                             inner_block = OpenBlockKind::Formula;
                         } else {
@@ -357,7 +360,7 @@ fn split_blocks<'a>(source: &'a str) -> FlatLexedProject<'a> {
                         let mut parts = line.thinned.split(IMG_SEP);
                         let path = parts.next().unwrap().trim_matches(|c| is_blank(c));
                         let name = parts.next().unwrap().trim_matches(|c| is_blank(c));
-                        let named = project.register_named(RefKind::Image, name);
+                        let named = project.links.register_named(RefKind::Image, name);
                         flush(&mut project.blocks, Some(path), BlockKind::Image(ImageKind {scale, named}), &mut par_is_open);
                     },
                     LineKind::List => {
@@ -407,7 +410,7 @@ fn split_blocks<'a>(source: &'a str) -> FlatLexedProject<'a> {
                                         inner_block = OpenBlockKind::None;
                                         break;
                                     } else {
-                                        let named = project.register_named(RefKind::Table, line.thinned);
+                                        let named = project.links.register_named(RefKind::Table, line.thinned);
                                         flush(&mut project.blocks, None, BlockKind::Table(named), &mut par_is_open);
                                         inner_block = OpenBlockKind::Table;
                                         break;
@@ -427,7 +430,7 @@ fn split_blocks<'a>(source: &'a str) -> FlatLexedProject<'a> {
                         if n == 0 {
                             flush(&mut project.blocks, Some(line.thinned), BlockKind::Note(n), &mut par_is_open);
                         }
-                        else if project.notes.insert(n) {
+                        else if project.links.notes.insert(n) {
                             flush(&mut project.blocks, Some(line.thinned), BlockKind::Note(n), &mut par_is_open);
                         }
                     }
@@ -476,7 +479,7 @@ fn split_blocks<'a>(source: &'a str) -> FlatLexedProject<'a> {
 #[cfg(test)] mod test {
     use std::{borrow::Cow, collections::HashSet, vec};
 
-use crate::parse::{common::*, block_fragmentation::{FlatLexedProject, Block, BlockKind::{self, Header}, ImageKind, Named, NamedLinkable, split_blocks}};
+use crate::parse::{common::*, block_fragmentation::{FlatLexedProject, InnerProjectLinks, Block, BlockKind::{self, Header}, ImageKind, Named, NamedLinkable, split_blocks}};
 
     fn project<'a>(blocks: Vec<Block<'a>>) -> FlatLexedProject<'a> {
         FlatLexedProject { blocks, ..Default::default() }
@@ -843,7 +846,7 @@ use crate::parse::{common::*, block_fragmentation::{FlatLexedProject, Block, Blo
         let source = "\\// aa\nbb\n\\//";
         let out = split_blocks(source);
         let expected = FlatLexedProject {
-            code: refs(&[("aa", 1)]),
+            links: InnerProjectLinks { code: refs(&[("aa", 1)]), ..Default::default() },
             blocks: vec![
                 Block {
                     kind: BlockKind::Code(Named::WithName { name: "aa", index: 1 }),
@@ -873,7 +876,7 @@ use crate::parse::{common::*, block_fragmentation::{FlatLexedProject, Block, Blo
         let source = "\\// aa\n\t   bb\n   cc\n\n\tdd\n\\//";
         let out = split_blocks(source);
         let expected = FlatLexedProject {
-            code: refs(&[("aa", 1)]),
+            links: InnerProjectLinks { code: refs(&[("aa", 1)]), ..Default::default() },
             blocks: vec![
                 Block {
                     kind: BlockKind::Code(Named::WithName { name: "aa", index: 1 }),
@@ -890,7 +893,7 @@ use crate::parse::{common::*, block_fragmentation::{FlatLexedProject, Block, Blo
         let source = "\\// aa\nbb\r\n\\//";
         let out = split_blocks(source);
         let expected = FlatLexedProject {
-            code: refs(&[("aa", 1)]),
+            links: InnerProjectLinks { code: refs(&[("aa", 1)]), ..Default::default() },
             blocks: vec![
                 Block {
                     kind: BlockKind::Code(Named::WithName { name: "aa", index: 1 }),
@@ -907,7 +910,7 @@ use crate::parse::{common::*, block_fragmentation::{FlatLexedProject, Block, Blo
         let source = "\\// aa\nbb\n\t\t   \\//\t   ";
         let out = split_blocks(source);
         let expected = FlatLexedProject {
-            code: refs(&[("aa", 1)]),
+            links: InnerProjectLinks { code: refs(&[("aa", 1)]), ..Default::default() },
             blocks: vec![
                 Block {
                     kind: BlockKind::Code(Named::WithName { name: "aa", index: 1 }),
@@ -950,7 +953,7 @@ use crate::parse::{common::*, block_fragmentation::{FlatLexedProject, Block, Blo
         let source = "\\// aa\n  \nbb\ncc\n\\//";
         let out = split_blocks(source);
         let expected = FlatLexedProject {
-            code: refs(&[("aa", 1)]),
+            links: InnerProjectLinks { code: refs(&[("aa", 1)]), ..Default::default() },
             blocks: vec![
                 Block {
                     kind: BlockKind::Code(Named::WithName { name: "aa", index: 1 }),
@@ -968,7 +971,7 @@ use crate::parse::{common::*, block_fragmentation::{FlatLexedProject, Block, Blo
         let source = "\\// aa\nbb\ncc\n\\// dd\nee\n\\//";
         let out = split_blocks(source);
         let expected = FlatLexedProject {
-            code: refs(&[("dd", 1)]),
+            links: InnerProjectLinks { code: refs(&[("dd", 1)]), ..Default::default() },
             blocks: vec![
                 Block {
                     kind: BlockKind::Paragraph,
@@ -989,7 +992,7 @@ use crate::parse::{common::*, block_fragmentation::{FlatLexedProject, Block, Blo
         let source = "aa\n\\// bb\ncc\n\\//\ndd";
         let out = split_blocks(source);
         let expected = FlatLexedProject {
-            code: refs(&[("bb", 1)]),
+            links: InnerProjectLinks { code: refs(&[("bb", 1)]), ..Default::default() },
             blocks: vec![
                 Block {
                     kind: BlockKind::Paragraph,
@@ -1216,7 +1219,7 @@ use crate::parse::{common::*, block_fragmentation::{FlatLexedProject, Block, Blo
         let source = "\\$ aa\nbb\n\\$";
         let out = split_blocks(source);
         let expected = FlatLexedProject {
-            formulas: refs(&[("aa", 1)]),
+            links: InnerProjectLinks { formulas: refs(&[("aa", 1)]), ..Default::default() },
             blocks: vec![
                 Block {
                     kind: BlockKind::Formula(Named::WithName { name: "aa", index: 1 }),
@@ -1246,7 +1249,7 @@ use crate::parse::{common::*, block_fragmentation::{FlatLexedProject, Block, Blo
         let source = "\\$  \t aa \t\nbb\n\\$";
         let out = split_blocks(source);
         let expected = FlatLexedProject {
-            formulas: refs(&[("aa", 1)]),
+            links: InnerProjectLinks { formulas: refs(&[("aa", 1)]), ..Default::default() },
             blocks: vec![
                 Block {
                     kind: BlockKind::Formula(Named::WithName { name: "aa", index: 1 }),
@@ -1276,7 +1279,7 @@ use crate::parse::{common::*, block_fragmentation::{FlatLexedProject, Block, Blo
         let source = "\\$\taa\nbb\n\\$";
         let out = split_blocks(source);
         let expected = FlatLexedProject {
-            formulas: refs(&[("aa", 1)]),
+            links: InnerProjectLinks { formulas: refs(&[("aa", 1)]), ..Default::default() },
             blocks: vec![
                 Block {
                     kind: BlockKind::Formula(Named::WithName { name: "aa", index: 1 }),
@@ -1293,7 +1296,7 @@ use crate::parse::{common::*, block_fragmentation::{FlatLexedProject, Block, Blo
         let source = "\\$ aa\n  \\frac{a}{b}\t\n\t= c\n\\$";
         let out = split_blocks(source);
         let expected = FlatLexedProject {
-            formulas: refs(&[("aa", 1)]),
+            links: InnerProjectLinks { formulas: refs(&[("aa", 1)]), ..Default::default() },
             blocks: vec![
                 Block {
                     kind: BlockKind::Formula(Named::WithName { name: "aa", index: 1 }),
@@ -1310,7 +1313,7 @@ use crate::parse::{common::*, block_fragmentation::{FlatLexedProject, Block, Blo
         let source = "\\$ aa\r\nbb\r\n\\$\r\n";
         let out = split_blocks(source);
         let expected = FlatLexedProject {
-            formulas: refs(&[("aa", 1)]),
+            links: InnerProjectLinks { formulas: refs(&[("aa", 1)]), ..Default::default() },
             blocks: vec![
                 Block {
                     kind: BlockKind::Formula(Named::WithName { name: "aa", index: 1 }),
@@ -1327,7 +1330,7 @@ use crate::parse::{common::*, block_fragmentation::{FlatLexedProject, Block, Blo
         let source = "\\$ aa\nbb\n\t\t   \\$\t   ";
         let out = split_blocks(source);
         let expected = FlatLexedProject {
-            formulas: refs(&[("aa", 1)]),
+            links: InnerProjectLinks { formulas: refs(&[("aa", 1)]), ..Default::default() },
             blocks: vec![
                 Block {
                     kind: BlockKind::Formula(Named::WithName { name: "aa", index: 1 }),
@@ -1400,7 +1403,7 @@ use crate::parse::{common::*, block_fragmentation::{FlatLexedProject, Block, Blo
         let source = "\\$ aa\n  \nbb\n\ncc\n\\$";
         let out = split_blocks(source);
         let expected = FlatLexedProject {
-            formulas: refs(&[("aa", 1)]),
+            links: InnerProjectLinks { formulas: refs(&[("aa", 1)]), ..Default::default() },
             blocks: vec![
                 Block {
                     kind: BlockKind::Formula(Named::WithName { name: "aa", index: 1 }),
@@ -1417,7 +1420,7 @@ use crate::parse::{common::*, block_fragmentation::{FlatLexedProject, Block, Blo
         let source = "\\$ aa\nbb\ncc\n\\$ dd\nee\n\\$";
         let out = split_blocks(source);
         let expected = FlatLexedProject {
-            formulas: refs(&[("dd", 1)]),
+            links: InnerProjectLinks { formulas: refs(&[("dd", 1)]), ..Default::default() },
             blocks: vec![
                 Block {
                     kind: BlockKind::Paragraph,
@@ -1438,7 +1441,7 @@ use crate::parse::{common::*, block_fragmentation::{FlatLexedProject, Block, Blo
         let source = "aa\n\\$ bb\ncc\n\\$\ndd";
         let out = split_blocks(source);
         let expected = FlatLexedProject {
-            formulas: refs(&[("bb", 1)]),
+            links: InnerProjectLinks { formulas: refs(&[("bb", 1)]), ..Default::default() },
             blocks: vec![
                 Block {
                     kind: BlockKind::Paragraph,
@@ -1463,7 +1466,7 @@ use crate::parse::{common::*, block_fragmentation::{FlatLexedProject, Block, Blo
         let source = "\\$ aa\n\\+ bb\n\\\"\n\\// cc\n\\//\n\\$";
         let out = split_blocks(source);
         let expected = FlatLexedProject {
-            formulas: refs(&[("aa", 1)]),
+            links: InnerProjectLinks { formulas: refs(&[("aa", 1)]), ..Default::default() },
             blocks: vec![
                 Block {
                     kind: BlockKind::Formula(Named::WithName { name: "aa", index: 1 }),
@@ -1480,7 +1483,7 @@ use crate::parse::{common::*, block_fragmentation::{FlatLexedProject, Block, Blo
         let source = "\\$ aa\nbb\n\\$\n\\\"\ncc\n\\\"";
         let out = split_blocks(source);
         let expected = FlatLexedProject {
-            formulas: refs(&[("aa", 1)]),
+            links: InnerProjectLinks { formulas: refs(&[("aa", 1)]), ..Default::default() },
             blocks: vec![
                 Block {
                     kind: BlockKind::Formula(Named::WithName { name: "aa", index: 1 }),
@@ -1502,7 +1505,7 @@ use crate::parse::{common::*, block_fragmentation::{FlatLexedProject, Block, Blo
         let source = "\\(aa, bb, 110)";
         let out = split_blocks(source);
         let expected = FlatLexedProject {
-            images: refs(&[("bb", 1)]),
+            links: InnerProjectLinks { images: refs(&[("bb", 1)]), ..Default::default() },
             blocks: vec![
                 Block {
                     kind: BlockKind::Image(ImageKind {named: Named::WithName { name: "bb", index: 1 }, scale: 110}),
@@ -1519,7 +1522,7 @@ use crate::parse::{common::*, block_fragmentation::{FlatLexedProject, Block, Blo
         let source = "\\(aa, bb, cc)";
         let out = split_blocks(source);
         let expected = FlatLexedProject {
-            images: refs(&[("bb", 1)]),
+            links: InnerProjectLinks { images: refs(&[("bb", 1)]), ..Default::default() },
             blocks: vec![
                 Block { kind: BlockKind::Image(ImageKind { named: Named::WithName { name: "bb", index: 1 }, scale: 100}), lines: vec!["aa"] }
             ],
@@ -1584,7 +1587,7 @@ use crate::parse::{common::*, block_fragmentation::{FlatLexedProject, Block, Blo
         let source = "\\№ tt\n/aa/bb/\n\\№- Л / Л\n/cc/dd/\n\\№";
         let out = split_blocks(source);
         let expected = FlatLexedProject {
-            tables: refs(&[("tt", 1)]),
+            links: InnerProjectLinks { tables: refs(&[("tt", 1)]), ..Default::default() },
             blocks: vec![
                 Block {
                     kind: BlockKind::Table(Named::WithName { name: "tt", index: 1 }),
@@ -1601,7 +1604,7 @@ use crate::parse::{common::*, block_fragmentation::{FlatLexedProject, Block, Blo
         let source = "\\**1 aa\n\\**1 aa";
         let out = split_blocks(source);
         let expected = FlatLexedProject {
-            notes: HashSet::from([1]),
+            links: InnerProjectLinks { notes: HashSet::from([1]), ..Default::default() },
             blocks: vec![
                 Block {
                     kind: BlockKind::Note(1),
@@ -1790,7 +1793,7 @@ use crate::parse::{common::*, block_fragmentation::{FlatLexedProject, Block, Blo
         let source = "\\// aa\nbb\n\\ //\n\\//";
         let out = split_blocks(source);
         let expected = FlatLexedProject {
-            code: refs(&[("aa", 1)]),
+            links: InnerProjectLinks { code: refs(&[("aa", 1)]), ..Default::default() },
             blocks: vec![
                 Block {
                     kind: BlockKind::Code(Named::WithName { name: "aa", index: 1 }),
@@ -1807,7 +1810,7 @@ use crate::parse::{common::*, block_fragmentation::{FlatLexedProject, Block, Blo
         let source = "\\$ aa\nbb\n\\ $\n\\$";
         let out = split_blocks(source);
         let expected = FlatLexedProject {
-            formulas: refs(&[("aa", 1)]),
+            links: InnerProjectLinks { formulas: refs(&[("aa", 1)]), ..Default::default() },
             blocks: vec![
                 Block {
                     kind: BlockKind::Formula(Named::WithName { name: "aa", index: 1 }),
@@ -2003,7 +2006,7 @@ use crate::parse::{common::*, block_fragmentation::{FlatLexedProject, Block, Blo
         let source = "\\. aa\n\\(bb, cc)\n\\. dd";
         let out = split_blocks(source);
         let expected = FlatLexedProject {
-            images: refs(&[("cc", 1)]),
+            links: InnerProjectLinks { images: refs(&[("cc", 1)]), ..Default::default() },
             blocks: vec![
                 Block {
                     kind: BlockKind::List,
@@ -2028,7 +2031,7 @@ use crate::parse::{common::*, block_fragmentation::{FlatLexedProject, Block, Blo
         let source = "\\. aa\n\\// bb\ncc\n\\//\n\\. dd";
         let out = split_blocks(source);
         let expected = FlatLexedProject {
-            code: refs(&[("bb", 1)]),
+            links: InnerProjectLinks { code: refs(&[("bb", 1)]), ..Default::default() },
             blocks: vec![
                 Block {
                     kind: BlockKind::List,
@@ -2053,7 +2056,7 @@ use crate::parse::{common::*, block_fragmentation::{FlatLexedProject, Block, Blo
         let source = "\\. aa\n\\№ tt\n/bb/\n\\№-\n/cc/\n\\№\n\\. dd";
         let out = split_blocks(source);
         let expected = FlatLexedProject {
-            tables: refs(&[("tt", 1)]),
+            links: InnerProjectLinks { tables: refs(&[("tt", 1)]), ..Default::default() },
             blocks: vec![
                 Block {
                     kind: BlockKind::List,
@@ -2078,7 +2081,7 @@ use crate::parse::{common::*, block_fragmentation::{FlatLexedProject, Block, Blo
         let source = "\\(aa, bb)";
         let out = split_blocks(source);
         let expected = FlatLexedProject {
-            images: refs(&[("bb", 1)]),
+            links: InnerProjectLinks { images: refs(&[("bb", 1)]), ..Default::default() },
             blocks: vec![
                 Block {
                     kind: BlockKind::Image(ImageKind { named: Named::WithName { name: "bb", index: 1 }, scale: 100}),
@@ -2108,7 +2111,7 @@ use crate::parse::{common::*, block_fragmentation::{FlatLexedProject, Block, Blo
         let source = "\\(aa, bb, 1)";
         let out = split_blocks(source);
         let expected = FlatLexedProject {
-            images: refs(&[("bb", 1)]),
+            links: InnerProjectLinks { images: refs(&[("bb", 1)]), ..Default::default() },
             blocks: vec![
                 Block {
                     kind: BlockKind::Image(ImageKind { named: Named::WithName { name: "bb", index: 1 }, scale: 1}),
@@ -2122,7 +2125,7 @@ use crate::parse::{common::*, block_fragmentation::{FlatLexedProject, Block, Blo
         let source = "\\(aa, bb, 65535)";
         let out = split_blocks(source);
         let expected = FlatLexedProject {
-            images: refs(&[("bb", 1)]),
+            links: InnerProjectLinks { images: refs(&[("bb", 1)]), ..Default::default() },
             blocks: vec![
                 Block {
                     kind: BlockKind::Image(ImageKind { named: Named::WithName { name: "bb", index: 1 }, scale: 65535}),
@@ -2139,7 +2142,7 @@ use crate::parse::{common::*, block_fragmentation::{FlatLexedProject, Block, Blo
         let source = "\\(aa, bb, 0)";
         let out = split_blocks(source);
         let expected = FlatLexedProject {
-            images: refs(&[("bb", 1)]),
+            links: InnerProjectLinks { images: refs(&[("bb", 1)]), ..Default::default() },
             blocks: vec![
                 Block {
                     kind: BlockKind::Image(ImageKind { named: Named::WithName { name: "bb", index: 1 }, scale: 100}),
@@ -2153,7 +2156,7 @@ use crate::parse::{common::*, block_fragmentation::{FlatLexedProject, Block, Blo
         let source = "\\(aa, bb, -5)";
         let out = split_blocks(source);
         let expected = FlatLexedProject {
-            images: refs(&[("bb", 1)]),
+            links: InnerProjectLinks { images: refs(&[("bb", 1)]), ..Default::default() },
             blocks: vec![
                 Block {
                     kind: BlockKind::Image(ImageKind { named: Named::WithName { name: "bb", index: 1 }, scale: 100}),
@@ -2167,7 +2170,7 @@ use crate::parse::{common::*, block_fragmentation::{FlatLexedProject, Block, Blo
         let source = "\\(aa, bb, 65536)";
         let out = split_blocks(source);
         let expected = FlatLexedProject {
-            images: refs(&[("bb", 1)]),
+            links: InnerProjectLinks { images: refs(&[("bb", 1)]), ..Default::default() },
             blocks: vec![
                 Block {
                     kind: BlockKind::Image(ImageKind { named: Named::WithName { name: "bb", index: 1 }, scale: 100}),
@@ -2181,7 +2184,7 @@ use crate::parse::{common::*, block_fragmentation::{FlatLexedProject, Block, Blo
         let source = "\\(aa, bb, )";
         let out = split_blocks(source);
         let expected = FlatLexedProject {
-            images: refs(&[("bb", 1)]),
+            links: InnerProjectLinks { images: refs(&[("bb", 1)]), ..Default::default() },
             blocks: vec![
                 Block {
                     kind: BlockKind::Image(ImageKind { named: Named::WithName { name: "bb", index: 1 }, scale: 100}),
@@ -2250,7 +2253,7 @@ use crate::parse::{common::*, block_fragmentation::{FlatLexedProject, Block, Blo
         let source = "  \t\\(aa, bb, 100)\t  ";
         let out = split_blocks(source);
         let expected = FlatLexedProject {
-            images: refs(&[("bb", 1)]),
+            links: InnerProjectLinks { images: refs(&[("bb", 1)]), ..Default::default() },
             blocks: vec![
                 Block {
                     kind: BlockKind::Image(ImageKind { named: Named::WithName { name: "bb", index: 1 }, scale: 100}),
@@ -2267,7 +2270,7 @@ use crate::parse::{common::*, block_fragmentation::{FlatLexedProject, Block, Blo
         let source = "aa\n\\(bb, cc)\ndd";
         let out = split_blocks(source);
         let expected = FlatLexedProject {
-            images: refs(&[("cc", 1)]),
+            links: InnerProjectLinks { images: refs(&[("cc", 1)]), ..Default::default() },
             blocks: vec![
                 Block {
                     kind: BlockKind::Paragraph,
@@ -2292,7 +2295,7 @@ use crate::parse::{common::*, block_fragmentation::{FlatLexedProject, Block, Blo
         let source = "\\(aa, bb)\n\\(cc, dd, 50)";
         let out = split_blocks(source);
         let expected = FlatLexedProject {
-            images: refs(&[("bb", 1), ("dd", 2)]),
+            links: InnerProjectLinks { images: refs(&[("bb", 1), ("dd", 2)]), ..Default::default() },
             blocks: vec![
                 Block {
                     kind: BlockKind::Image(ImageKind { named: Named::WithName { name: "bb", index: 1 }, scale: 100}),
@@ -2327,7 +2330,7 @@ use crate::parse::{common::*, block_fragmentation::{FlatLexedProject, Block, Blo
         let source = "   \\**1\t  aa bb \t";
         let out = split_blocks(source);
         let expected = FlatLexedProject {
-            notes: HashSet::from([1]),
+            links: InnerProjectLinks { notes: HashSet::from([1]), ..Default::default() },
             blocks: vec![
                 Block {
                     kind: BlockKind::Note(1),
@@ -2344,7 +2347,7 @@ use crate::parse::{common::*, block_fragmentation::{FlatLexedProject, Block, Blo
         let source = "aa\n\\**1 bb\ncc";
         let out = split_blocks(source);
         let expected = FlatLexedProject {
-            notes: HashSet::from([1]),
+            links: InnerProjectLinks { notes: HashSet::from([1]), ..Default::default() },
             blocks: vec![
                 Block {
                     kind: BlockKind::Paragraph,
@@ -2447,7 +2450,7 @@ use crate::parse::{common::*, block_fragmentation::{FlatLexedProject, Block, Blo
         let source = "\\\"\naa\n\\// bb\ncc\n\\//";
         let out = split_blocks(source);
         let expected = FlatLexedProject {
-            code: refs(&[("bb", 1)]),
+            links: InnerProjectLinks { code: refs(&[("bb", 1)]), ..Default::default() },
             blocks: vec![
                 Block {
                     kind: BlockKind::Paragraph,
@@ -2489,7 +2492,7 @@ use crate::parse::{common::*, block_fragmentation::{FlatLexedProject, Block, Blo
         let source = "\\$ aa\n\\$";
         let out = split_blocks(source);
         let expected = FlatLexedProject {
-            formulas: refs(&[("aa", 1)]),
+            links: InnerProjectLinks { formulas: refs(&[("aa", 1)]), ..Default::default() },
             blocks: vec![
                 Block {
                     kind: BlockKind::Formula(Named::WithName { name: "aa", index: 1 }),
@@ -2506,7 +2509,7 @@ use crate::parse::{common::*, block_fragmentation::{FlatLexedProject, Block, Blo
         let source = "\\$ aa bb\ncc\n\\$";
         let out = split_blocks(source);
         let expected = FlatLexedProject {
-            formulas: refs(&[("aa bb", 1)]),
+            links: InnerProjectLinks { formulas: refs(&[("aa bb", 1)]), ..Default::default() },
             blocks: vec![
                 Block {
                     kind: BlockKind::Formula(Named::WithName { name: "aa bb", index: 1 }),
@@ -2523,7 +2526,7 @@ use crate::parse::{common::*, block_fragmentation::{FlatLexedProject, Block, Blo
         let source = "\\$ aa\n\\// bb\n\\$";
         let out = split_blocks(source);
         let expected = FlatLexedProject {
-            formulas: refs(&[("aa", 1)]),
+            links: InnerProjectLinks { formulas: refs(&[("aa", 1)]), ..Default::default() },
             blocks: vec![
                 Block {
                     kind: BlockKind::Formula(Named::WithName { name: "aa", index: 1 }),
@@ -2567,7 +2570,7 @@ use crate::parse::{common::*, block_fragmentation::{FlatLexedProject, Block, Blo
         let source = "\\// aa\n\\//";
         let out = split_blocks(source);
         let expected = FlatLexedProject {
-            code: refs(&[("aa", 1)]),
+            links: InnerProjectLinks { code: refs(&[("aa", 1)]), ..Default::default() },
             blocks: vec![
                 Block {
                     kind: BlockKind::Code(Named::WithName { name: "aa", index: 1 }),
@@ -2584,7 +2587,7 @@ use crate::parse::{common::*, block_fragmentation::{FlatLexedProject, Block, Blo
         let source = "\\// aa bb\ncc\n\\//";
         let out = split_blocks(source);
         let expected = FlatLexedProject {
-            code: refs(&[("aa bb", 1)]),
+            links: InnerProjectLinks { code: refs(&[("aa bb", 1)]), ..Default::default() },
             blocks: vec![
                 Block {
                     kind: BlockKind::Code(Named::WithName { name: "aa bb", index: 1 }),
@@ -2614,7 +2617,7 @@ use crate::parse::{common::*, block_fragmentation::{FlatLexedProject, Block, Blo
         let source = "\\// aa\n\\+ bb\n\\\"\n\\$ cc\n\\$\n\\№ dd\n\\. ee\n\\**1 ff\n\\(gg, hh)\n\\//";
         let out = split_blocks(source);
         let expected = FlatLexedProject {
-            code: refs(&[("aa", 1)]),
+            links: InnerProjectLinks { code: refs(&[("aa", 1)]), ..Default::default() },
             blocks: vec![
                 Block {
                     kind: BlockKind::Code(Named::WithName { name: "aa", index: 1 }),
@@ -2631,7 +2634,7 @@ use crate::parse::{common::*, block_fragmentation::{FlatLexedProject, Block, Blo
         let source = "\\// aa\n\\$ bb\ncc\n\\//";
         let out = split_blocks(source);
         let expected = FlatLexedProject {
-            code: refs(&[("aa", 1)]),
+            links: InnerProjectLinks { code: refs(&[("aa", 1)]), ..Default::default() },
             blocks: vec![
                 Block {
                     kind: BlockKind::Code(Named::WithName { name: "aa", index: 1 }),
@@ -2648,7 +2651,7 @@ use crate::parse::{common::*, block_fragmentation::{FlatLexedProject, Block, Blo
         let source = "\\// aa\r\nbb\r\n\r\ncc\r\n\\//\r\n";
         let out = split_blocks(source);
         let expected = FlatLexedProject {
-            code: refs(&[("aa", 1)]),
+            links: InnerProjectLinks { code: refs(&[("aa", 1)]), ..Default::default() },
             blocks: vec![
                 Block {
                     kind: BlockKind::Code(Named::WithName { name: "aa", index: 1 }),
@@ -2666,7 +2669,7 @@ use crate::parse::{common::*, block_fragmentation::{FlatLexedProject, Block, Blo
         let source = "\\№ tt\n/aa/bb/\n\\№-\n/cc/dd/\n\\№";
         let out = split_blocks(source);
         let expected = FlatLexedProject {
-            tables: refs(&[("tt", 1)]),
+            links: InnerProjectLinks { tables: refs(&[("tt", 1)]), ..Default::default() },
             blocks: vec![
                 Block {
                     kind: BlockKind::Table(Named::WithName { name: "tt", index: 1 }),
@@ -2683,7 +2686,7 @@ use crate::parse::{common::*, block_fragmentation::{FlatLexedProject, Block, Blo
         let source = "\\№ tt\n/aa/bb/\n/cc/dd/\n\\№- Л / П\n/ee/ff/\n\\№";
         let out = split_blocks(source);
         let expected = FlatLexedProject {
-            tables: refs(&[("tt", 1)]),
+            links: InnerProjectLinks { tables: refs(&[("tt", 1)]), ..Default::default() },
             blocks: vec![
                 Block {
                     kind: BlockKind::Table(Named::WithName { name: "tt", index: 1 }),
@@ -2700,7 +2703,7 @@ use crate::parse::{common::*, block_fragmentation::{FlatLexedProject, Block, Blo
         let source = "\\№ tt\n/aa/bb/\n\\№-\n\\№";
         let out = split_blocks(source);
         let expected = FlatLexedProject {
-            tables: refs(&[("tt", 1)]),
+            links: InnerProjectLinks { tables: refs(&[("tt", 1)]), ..Default::default() },
             blocks: vec![
                 Block {
                     kind: BlockKind::Table(Named::WithName { name: "tt", index: 1 }),
@@ -2730,7 +2733,7 @@ use crate::parse::{common::*, block_fragmentation::{FlatLexedProject, Block, Blo
         let source = "  \\№ tt \t\n\t/aa/bb/  \n \\№- Л \n  /cc/dd/\t\n  \\№  ";
         let out = split_blocks(source);
         let expected = FlatLexedProject {
-            tables: refs(&[("tt", 1)]),
+            links: InnerProjectLinks { tables: refs(&[("tt", 1)]), ..Default::default() },
             blocks: vec![
                 Block {
                     kind: BlockKind::Table(Named::WithName { name: "tt", index: 1 }),
@@ -2747,7 +2750,7 @@ use crate::parse::{common::*, block_fragmentation::{FlatLexedProject, Block, Blo
         let source = "\\№ tt\r\n/aa/\r\n\\№-\r\n/bb/\r\n\\№\r\n";
         let out = split_blocks(source);
         let expected = FlatLexedProject {
-            tables: refs(&[("tt", 1)]),
+            links: InnerProjectLinks { tables: refs(&[("tt", 1)]), ..Default::default() },
             blocks: vec![
                 Block {
                     kind: BlockKind::Table(Named::WithName { name: "tt", index: 1 }),
@@ -2907,7 +2910,7 @@ use crate::parse::{common::*, block_fragmentation::{FlatLexedProject, Block, Blo
         let source = "\\№ Неполная таблица\n/ Заголовок / Заголовок /\n\\№ Новая таблица\n/ Заголовок / Заголовок /\n\\№-\n/ ячейка / ячейка /\n\\№";
         let out = split_blocks(source);
         let expected = FlatLexedProject {
-            tables: refs(&[("новая таблица", 1)]),
+            links: InnerProjectLinks { tables: refs(&[("новая таблица", 1)]), ..Default::default() },
             blocks: vec![
                 Block {
                     kind: BlockKind::Paragraph,
@@ -2928,7 +2931,7 @@ use crate::parse::{common::*, block_fragmentation::{FlatLexedProject, Block, Blo
         let source = "aa\n\\№ tt\n/bb/\n\\№-\n/cc/\n\\№\ndd";
         let out = split_blocks(source);
         let expected = FlatLexedProject {
-            tables: refs(&[("tt", 1)]),
+            links: InnerProjectLinks { tables: refs(&[("tt", 1)]), ..Default::default() },
             blocks: vec![
                 Block {
                     kind: BlockKind::Paragraph,
@@ -2953,7 +2956,7 @@ use crate::parse::{common::*, block_fragmentation::{FlatLexedProject, Block, Blo
         let source = "\\№ tt\n/aa/\n\\№-\n/bb/\n\\№\n\\№ uu\n/cc/\n\\№-\n/dd/\n\\№";
         let out = split_blocks(source);
         let expected = FlatLexedProject {
-            tables: refs(&[("tt", 1), ("uu", 2)]),
+            links: InnerProjectLinks { tables: refs(&[("tt", 1), ("uu", 2)]), ..Default::default() },
             blocks: vec![
                 Block {
                     kind: BlockKind::Table(Named::WithName { name: "tt", index: 1 }),

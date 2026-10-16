@@ -1,4 +1,5 @@
 use std::{collections::{HashMap, hash_map::Entry}, fs, io, path::{Component, Path, PathBuf}};
+use crate::parse::lexemas::EXT_DIV;
 
 const IMG_EXTENSIONS: &[&str] = &["png", "jpg", "jpeg", "webp"];
 const FILE_EXTENSIONS: &[&str] = &["rush"];
@@ -10,12 +11,35 @@ pub(crate) struct GlobalProject {
     pub(crate) files: HashMap<String, PathBuf>
 }
 
+fn get_path<'a>(file: &'a str, exts: &[&str]) -> &'a str{
+    if let Some(pos) = file.rfind(EXT_DIV) {
+        let name = &file[..pos];
+        let ext = &file[pos+EXT_DIV.len_utf8()..];
+        if exts.iter().any(|e| ext.eq_ignore_ascii_case(e)) {
+            name
+        } else { file }
+    } else {file}
+}
+
 impl GlobalProject {
     pub fn build_index(root: &Path) -> io::Result<GlobalProject> {
         let mut project = GlobalProject::default();
         walk(root, root, &mut project)?;
         Ok(project)
     }
+
+
+
+    pub fn get_file(&self, file: &str) -> Option<PathBuf> {
+        let name = get_path(file, FILE_EXTENSIONS);
+        self.files.get(name).cloned()
+    }
+
+    pub fn get_image(&self, file: &str) -> Option<PathBuf> {
+        let name = get_path(file, IMG_EXTENSIONS);
+        self.images.get(name).cloned()
+    }
+
 }
 
 fn walk(root: &Path, dir: &Path, index: &mut GlobalProject) -> io::Result<()> {

@@ -343,7 +343,7 @@ impl<'a> PreparsedLines<'a> {
         line.len()
     }
 
-    fn new(lines: Vec<&'a str>) -> Self {
+    pub(crate) fn new(lines: Vec<&'a str>) -> Self {
         let mut out = Self {
             text: Vec::new(),
             style_ranges: Vec::new()
@@ -551,7 +551,7 @@ impl<'a> PreSpan<'a>{
 
 
 
-pub(crate) fn generate_spans<'a>(preparsed: PreparsedLines<'a>) -> Vec<PreSpan<'a>> {
+pub(crate) fn generate_pre_spans<'a>(preparsed: PreparsedLines<'a>) -> Vec<PreSpan<'a>> {
     let mut difs: Vec<PreStyleDiff> = vec![PreStyleDiff::default(); preparsed.text.len()];
     
     for range in preparsed.style_ranges {
@@ -679,7 +679,7 @@ pub(crate) fn generate_spans<'a>(preparsed: PreparsedLines<'a>) -> Vec<PreSpan<'
     }
 
     fn check_spans<'a>(lines: Vec<&'a str>, expected: Vec<(Vec<InlinePreEl<'a>>, PreStyle<'a>)>) {
-        let out: Vec<_> = generate_spans(PreparsedLines::new(lines.clone()))
+        let out: Vec<_> = generate_pre_spans(PreparsedLines::new(lines.clone()))
             .into_iter()
             .map(|span| (span.text, span.style))
             .collect();

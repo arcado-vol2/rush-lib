@@ -67,7 +67,7 @@ impl Color {
     }
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Copy, Clone)]
 pub(crate) enum RefKind {
     Formula,
     Table,

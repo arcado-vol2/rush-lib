@@ -35,6 +35,8 @@ pub(crate) const SMALL_YO: char = 'ё';
 pub(crate) const BIG_YO: char = 'Ё';
 pub(crate) const SMALL_E: char = 'е';
 pub(crate) const BIG_E: char = 'Е';
+pub(crate) const EXT_DIV: char = '.';
+
 
 pub(crate) const BYTE_SHIELD: u8 = b'_';
 
@@ -44,22 +46,33 @@ pub(crate) fn is_blank(c: char) -> bool{
 
 
 #[derive(Clone, Copy, Debug)]
-pub(crate) struct Tag {
-    pub(crate) ch: char,
-    pub(crate) count: usize,
+pub(crate) struct Tag<const N: usize, const V: usize = 1> {
+    pub(crate) variants: [[char; N]; V],
 }
 
-impl Tag {
-    pub(crate) const fn new(ch: char, count: usize) -> Self {
-         Self { ch, count }
+impl<const N: usize> Tag<N> {
+    pub(crate) const fn repeat(ch: char) -> Self {
+        Self { variants: [[ch; N]] }
+    }
+
+    pub(crate) const fn seq(seq: [char; N]) -> Self {
+        Self { variants: [seq] }
+    }
+}
+
+impl<const N: usize, const V: usize> Tag<N, V> {
+    pub(crate) const fn any(variants: [[char; N]; V]) -> Self {
+        Self { variants }
     }
 
     pub(crate) fn strip<'a>(&self, s: &'a str) -> Option<&'a str> {
-        let mut rest = s;
-        for _ in 0..self.count {
-            rest = rest.strip_prefix(self.ch)?;
-        }
-        Some(rest)
+        self.variants.iter().find_map(|seq| {
+            let mut rest = s;
+            for &ch in seq {
+                rest = rest.strip_prefix(ch)?;
+            }
+            Some(rest)
+        })
     }
 
     pub(crate) fn is(&self, s: &str) -> bool {
@@ -67,17 +80,28 @@ impl Tag {
     }
 }
 
-pub(crate)const CODE_TAG: Tag = Tag::new(CODE, 2);
-pub(crate)const COMMENT_TAG: Tag = Tag::new(COMMENT, 1);
-pub(crate)const FORMUAL_TAG: Tag = Tag::new(FORMULA, 1);
-pub(crate)const TABLE_TAG: Tag = Tag::new(TABLE, 1);
-pub(crate)const NOTE_TAG: Tag = Tag::new(NOTE, 2);
-pub(crate)const BULLET_LIST_TAG: Tag = Tag::new(BULLET_LIST, 1);
-pub(crate)const NUMERIC_LIST_TAG: Tag = Tag::new(NUMERIC_LIST, 1);
-pub(crate)const ANON_NAME_TAG: Tag = Tag::new(ANON, 1);
+pub(crate)const CODE_TAG: Tag<2> = Tag::repeat(CODE);
+pub(crate)const COMMENT_TAG: Tag<1> = Tag::repeat(COMMENT);
+pub(crate)const FORMUAL_TAG: Tag<1> = Tag::repeat(FORMULA);
+pub(crate)const TABLE_TAG: Tag<1> = Tag::repeat(TABLE);
+pub(crate)const NOTE_TAG: Tag<2> = Tag::repeat(NOTE);
+pub(crate)const BULLET_LIST_TAG: Tag<1> = Tag::repeat(BULLET_LIST);
+pub(crate)const NUMERIC_LIST_TAG: Tag<1> = Tag::repeat(NUMERIC_LIST);
+pub(crate)const ANON_NAME_TAG: Tag<1> = Tag::repeat(ANON);
+/// `\№-`
+pub(crate)const TABLE_FUL_SEP: Tag<3> = Tag::seq([MARK, TABLE, TABLE_FORMAT]);
+/// `+=` or `=+`
+pub(crate)const TABLE_MERGE_UP_LEFT_TAG: Tag<2, 2> = Tag::any([
+    [TABLE_MERGE_LEFT, TABLE_MERGE_UP],
+    [TABLE_MERGE_UP, TABLE_MERGE_LEFT],
+]);
+pub(crate)const TABLE_MERGE_LEFT_TAG: Tag<1> = Tag::repeat(TABLE_MERGE_LEFT);
+pub(crate)const TABLE_MERGE_UP_TAG: Tag<1> = Tag::repeat(TABLE_MERGE_UP);
+
 
 
 pub(crate) const NEW_LINE_BREAK: usize = 2;
+pub(crate) const TAB_WIDTH: u16 = 4;
 
 pub(crate) const FORMULA_REF: char = 'ф';
 pub(crate) const TABLE_REF: char = 'т';
