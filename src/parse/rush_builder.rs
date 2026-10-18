@@ -1,7 +1,7 @@
 use std::{path::PathBuf, vec};
 use std::fmt;
 
-use crate::parse::{block_fragmentation::{Block, BlockKind, InnerProjectLinks, split_blocks}, common::*, lexemas::{BULLET_LIST, MARK, NUMERIC_LIST, TAB, TAB_WIDTH, TABLE_FUL_SEP, TABLE_MERGE_LEFT_TAG, TABLE_MERGE_UP_LEFT_TAG, TABLE_MERGE_UP_TAG, TABLE_SEP, is_blank}, line_parse::{InlinePreEl, PreSpan, PreStyle, PreparsedLines, generate_pre_spans}, link_project::GlobalProject};
+use crate::parse::{block_fragmentation::{Block, BlockKind, InnerProjectLinks, split_blocks, unescape_image_path}, common::*, lexemas::{BULLET_LIST, MARK, NUMERIC_LIST, TAB, TAB_WIDTH, TABLE_CENTER, TABLE_FUL_SEP, TABLE_LEFT, TABLE_MERGE_LEFT_TAG, TABLE_MERGE_UP_LEFT_TAG, TABLE_MERGE_UP_TAG, TABLE_RIGHT, TABLE_SEP, is_blank}, line_parse::{InlineContext, InlinePreEl, PreSpan, PreStyle, PreparsedLines, generate_pre_spans}, link_project::GlobalProject};
 #[derive(Debug)]
 enum OuterLink<'a> {
     URL(&'a str),
@@ -58,7 +58,7 @@ struct Span<'a> {
 }
 
 impl<'a> Span<'a> {
-    fn from_pre_span(pre: PreSpan<'a>, outer_links: &GlobalProject, inner_links: &InnerProjectLinks) -> Self {
+    fn from_pre_span(pre: PreSpan<'a>, refs_allowed: bool, outer_links: &GlobalProject, inner_links: &InnerProjectLinks) -> Self {
         let PreStyle {is_bold, is_italic, is_mono, is_strike, is_under, color, link} = pre.style;
         println!("Color {color:?}");
         let link: Option<OuterLink> = match link {
@@ -76,7 +76,9 @@ impl<'a> Span<'a> {
             InlinePreEl::String(s) => InlineEl::String(s),
             InlinePreEl::Space => InlineEl::Space,
             InlinePreEl::InnerLink(s, k) => InlineEl::InnerLink(
-                inner_links.resolve(k, &s).map(|i| InnerLink { index: i, kind: k })
+                inner_links.resolve(k, &s)
+                    .filter(|_| refs_allowed)
+                    .map(|i| InnerLink { index: i, kind: k })
             ),
             InlinePreEl::Note(n) => InlineEl::Note(inner_links.has_note(n).then_some(n))
         }).collect();
@@ -86,12 +88,12 @@ impl<'a> Span<'a> {
 
 
 
-fn parse_generic_block<'a> (lines: Vec<&'a str>, outer_links: &GlobalProject, inner_links: &InnerProjectLinks) -> Vec<Span<'a>>{
-    let preparsed = PreparsedLines::new(lines);
+fn parse_generic_block<'a> (lines: Vec<&'a str>, ctx: InlineContext, outer_links: &GlobalProject, inner_links: &InnerProjectLinks) -> Vec<Span<'a>>{
+    let preparsed = PreparsedLines::new(lines, ctx);
     let pre_spans = generate_pre_spans(preparsed);
     let mut content = Vec::new();
     for pre in pre_spans {
-        content.push(Span::from_pre_span(pre, outer_links, inner_links));
+        content.push(Span::from_pre_span(pre, !ctx.is_name(), outer_links, inner_links));
     }
     content
 }
@@ -160,7 +162,7 @@ impl<'a> List<'a> {
                     i += j;
                 }
             } else if l_level == level {
-                let spans = parse_generic_block(vec![l_text], outer_links, inner_links);
+                let spans = parse_generic_block(vec![l_text], InlineContext::Text, outer_links, inner_links);
                 if l_is_bullet {
                     out.push(
                     ListEl {
@@ -222,6 +224,23 @@ enum TableEl<'a> {
 }
 
 
+fn split_table_cells(line: &str) -> Vec<&str> {
+    let mut out = Vec::new();
+    let mut start = 0;
+    let mut prev: Option<char> = None;
+    let mut chars = line.char_indices().peekable();
+    while let Some((i, ch)) = chars.next() {
+        let next = chars.peek().map(|&(_, c)| c);
+        if ch == TABLE_SEP && prev.is_none_or(is_blank) && next.is_none_or(is_blank) {
+            out.push(line[start..i].trim_matches(is_blank));
+            start = i + ch.len_utf8();
+        }
+        prev = Some(ch);
+    }
+    out.push(line[start..].trim_matches(is_blank));
+    out
+}
+
 #[derive(Debug)]
 struct Table<'a> {
     named: Named<Vec<Span<'a>>>,
@@ -230,33 +249,74 @@ struct Table<'a> {
     cells: Vec<Vec<TableEl<'a>>>,
 }
 impl<'a> Table<'a> {
-    fn new(lines: Vec<&'a str>, outer_links: &GlobalProject, inner_links: &InnerProjectLinks) -> Self {
-        let mut lines = lines.iter().peekable();
-        while let Some(line) = lines.peek() && line.strip_prefix(|s| TABLE_FUL_SEP.is(s)).is_some() {
-            let line = lines.next().unwrap();
-            let line = Self::parse_table_line(line, outer_links, inner_links);
-            println!("head {line:?}");
-        }
-        println!("Sep: {:?}", lines.next());
-        while let Some(line) = lines.next(){
-            println!("bode: {line:?}");
-        }
-        unimplemented!("no");
+    fn new(named: Named<Vec<Span<'a>>>, lines: Vec<&'a str>, outer_links: &GlobalProject, inner_links: &InnerProjectLinks) -> Self {
+        let sep = lines.iter()
+            .position(|l| TABLE_FUL_SEP.strip(l).is_some())
+            .expect("table block without separator");
+        let parse_rows = |rows: &[&'a str]| -> Vec<Vec<TableEl<'a>>> {
+            rows.iter().map(|l| Self::parse_table_line(l, outer_links, inner_links)).collect()
+        };
+        let mut headers = parse_rows(&lines[..sep]);
+        let mut cells = parse_rows(&lines[sep + 1..]);
+        let columns = headers.iter().map(Vec::len).max().unwrap_or(0);
+        Self::normalize(&mut headers, columns);
+        Self::normalize(&mut cells, columns);
+        let aligments = Self::parse_aligments(TABLE_FUL_SEP.strip(lines[sep]).unwrap(), columns);
+        Self { named, headers, aligments, cells }
     }
 
+    fn normalize(rows: &mut Vec<Vec<TableEl<'a>>>, columns: usize) {
+        for (r, row) in rows.iter_mut().enumerate() {
+            row.resize_with(columns, || TableEl::Cell(Vec::new()));
+            for (c, el) in row.iter_mut().enumerate() {
+                let impossible = match el {
+                    TableEl::MergeLeft => c == 0,
+                    TableEl::MergeUp => r == 0,
+                    TableEl::MergeUpLeft => c == 0 || r == 0,
+                    TableEl::Cell(_) => false
+                };
+                if impossible {
+                    *el = TableEl::Cell(Vec::new());
+                }
+            }
+        }
+    }
+
+    fn parse_aligments(rest: &str, columns: usize) -> Vec<Aligment> {
+        let rest = rest.trim_matches(is_blank);
+        let mut pieces = split_table_cells(rest);
+        if rest.ends_with(TABLE_SEP) {
+            pieces.pop();
+        }
+        if rest.starts_with(TABLE_SEP) && !pieces.is_empty() {
+            pieces.remove(0);
+        }
+        let mut pieces = pieces.into_iter();
+        (0..columns).map(|_| {
+            let mut chars = pieces.next().unwrap_or("").chars();
+            match (chars.next().and_then(|c| c.to_uppercase().next()), chars.next()) {
+                (Some(TABLE_LEFT), None) => Aligment::Left,
+                (Some(TABLE_RIGHT), None) => Aligment::Right,
+                (Some(TABLE_CENTER), None) => Aligment::Center,
+                _ => Aligment::default()
+            }
+        }).collect()
+    }
 
     fn parse_table_line(line: &'a str, outer_links: &GlobalProject, inner_links: &InnerProjectLinks) -> Vec<TableEl<'a>> {
-        line.split(TABLE_SEP).map(
-            |s| {
-                let raw = s.trim_matches(|c| is_blank(c));
+        let pieces = split_table_cells(line);
+        pieces[1..pieces.len() - 1].iter().map(
+            |&raw| {
                 if TABLE_MERGE_LEFT_TAG.is(raw) {
                     TableEl::MergeLeft
                 } else if TABLE_MERGE_UP_TAG.is(raw) {
                     TableEl::MergeUp
                 } else if TABLE_MERGE_UP_LEFT_TAG.is(raw) {
                     TableEl::MergeUpLeft
+                } else if raw.is_empty() {
+                    TableEl::Cell(Vec::new())
                 } else {
-                    TableEl::Cell(parse_generic_block(vec![raw], outer_links, inner_links))
+                    TableEl::Cell(parse_generic_block(vec![raw], InlineContext::TableCell, outer_links, inner_links))
                 }
             }
         ).collect()
@@ -281,37 +341,37 @@ impl<'a> Node<'a> {
     fn build_from_block(block: Block<'a>, outer_links: &GlobalProject, inner_links: &InnerProjectLinks) -> Self {
         match block.kind {
             BlockKind::Paragraph => {
-                let spans = parse_generic_block(block.lines, outer_links, inner_links);
+                let spans = parse_generic_block(block.lines, InlineContext::Text, outer_links, inner_links);
                 Self::Paragraph(Paragraph {content: spans})
             },
             BlockKind::Comment => {
-                let spans = parse_generic_block(block.lines, outer_links, inner_links);
+                let spans = parse_generic_block(block.lines, InlineContext::Text, outer_links, inner_links);
                 Self::Comment(Comment {content: spans})
             },
             BlockKind::Header(l) => {
-                let spans = parse_generic_block(block.lines, outer_links, inner_links);
+                let spans = parse_generic_block(block.lines, InlineContext::Text, outer_links, inner_links);
                 Self::Header( Header{content: spans, level: l})
             },
             BlockKind::Note(i) => {
-                let spans = parse_generic_block(block.lines, outer_links, inner_links);
+                let spans = parse_generic_block(block.lines, InlineContext::Text, outer_links, inner_links);
                 Self::Note(Note {index: i, content: spans})
             },
             BlockKind::Code(name) => {
                 Self::Code(Code {
-                    named: name.map(|s| parse_generic_block(vec![s], outer_links, inner_links)),
+                    named: name.map(|s| parse_generic_block(vec![s], InlineContext::Name, outer_links, inner_links)),
                     content: block.lines
                 })
             },
             BlockKind::Formula(name) => {
                 Self::Formula(Formula {
-                    named: name.map(|s| parse_generic_block(vec![s], outer_links, inner_links)),
+                    named: name.map(|s| parse_generic_block(vec![s], InlineContext::Name, outer_links, inner_links)),
                     content: block.lines
                 })
             },
             BlockKind::Image(img) => {
                 Self::Image(Image {
-                     meta: img.map(|s| parse_generic_block(vec![s], outer_links, inner_links)),
-                     path: block.lines.first().and_then(|s| outer_links.get_image(s))
+                     meta: img.map(|s| parse_generic_block(vec![s], InlineContext::ImageName, outer_links, inner_links)),
+                     path: block.lines.first().and_then(|s| outer_links.get_image(&unescape_image_path(s)))
                 })
             },
             BlockKind::List => {
@@ -320,10 +380,13 @@ impl<'a> Node<'a> {
                 Self::List(List { content: out })
             },
             BlockKind::Table(name) => {
-                Self::Table(Table::new(block.lines, outer_links, inner_links))
+                Self::Table(Table::new(
+                    name.map(|s| parse_generic_block(vec![s], InlineContext::Name, outer_links, inner_links)),
+                    block.lines,
+                    outer_links,
+                    inner_links
+                ))
             }
-
-            _ => unimplemented!("not impl")
         }
     }
 }
@@ -449,7 +512,7 @@ impl<'a> Rush<'a> {
 
 #[cfg(test)] mod test {
     use std::collections::HashMap;
-    use crate::parse::{rush_builder::Rush, link_project::GlobalProject};
+    use crate::parse::{rush_builder::*, link_project::GlobalProject};
 
     fn empty_gp() -> GlobalProject {
         GlobalProject {
@@ -458,9 +521,159 @@ impl<'a> Rush<'a> {
         }
     }
 
+    fn spans_text(spans: &[Span]) -> String {
+        spans.iter()
+            .flat_map(|s| s.text.iter())
+            .map(|el| match el {
+                InlineEl::String(s) => s,
+                InlineEl::Space => " ",
+                _ => "?"
+            })
+            .collect::<String>()
+            .trim_end()
+            .to_string()
+    }
+
+    fn row_text(row: &[TableEl]) -> Vec<String> {
+        row.iter().map(|el| match el {
+            TableEl::Cell(spans) => spans_text(spans),
+            TableEl::MergeLeft => "\\+".to_string(),
+            TableEl::MergeUp => "\\=".to_string(),
+            TableEl::MergeUpLeft => "\\+=".to_string(),
+        }).collect()
+    }
+
+    fn rows_text(rows: &[Vec<TableEl>]) -> Vec<Vec<String>> {
+        rows.iter().map(|r| row_text(r)).collect()
+    }
+
+    fn table(source: &str) -> (Vec<Vec<String>>, Vec<Vec<String>>, Vec<String>) {
+        let gp = empty_gp();
+        let out = Rush::new(source, &gp);
+        match &out.nodes[..] {
+            [Node::Table(t)] => (
+                rows_text(&t.headers),
+                rows_text(&t.cells),
+                t.aligments.iter().map(|a| format!("{a:?}")).collect()
+            ),
+            other => panic!("ожидалась одна таблица: {other:?}")
+        }
+    }
+
+    fn v(row: &[&str]) -> Vec<String> {
+        row.iter().map(|s| s.to_string()).collect()
+    }
+
     #[test]
     fn main() {
         let out = Rush::new("\\№ 0\n / Заг 1 / Заг 2 / \n \\№-\n / Яч 11 / Яч 12 /\n / Яч 21 / Яч 22 /\n\\№", &empty_gp());
         println!("{out:?}");
     }
-} 
+
+    #[test]
+    fn split_cells() {
+        assert_eq!(split_table_cells("/ a / b /"), vec!["", "a", "b", ""]);
+        assert_eq!(split_table_cells("/ км/ч / 5 /"), vec!["", "км/ч", "5", ""]);
+        assert_eq!(split_table_cells("/ a _/ b /"), vec!["", "a _/ b", ""]);
+        assert_eq!(split_table_cells("/ a//b /"), vec!["", "a//b", ""]);
+        assert_eq!(split_table_cells("/ / /"), vec!["", "", "", ""]);
+        assert_eq!(split_table_cells("/\ta\t/\tb /"), vec!["", "a", "b", ""]);
+        assert_eq!(split_table_cells("Л / Ц /"), vec!["Л", "Ц", ""]);
+    }
+
+    #[test]
+    fn table_escape_and_text_slash() {
+        let (h, b, _) = table("\\№ 0\n/ км/ч / a _/ b /\n\\№-\n/ x__/y / \\:ж_/: /\n\\№");
+        assert_eq!(h, vec![v(&["км/ч", "a / b"])]);
+        assert_eq!(b, vec![v(&["x_/y", "ж/"])]);
+    }
+
+    #[test]
+    fn slash_escape_only_in_table() {
+        let out = Rush::new("a _/ b", &empty_gp());
+        match &out.nodes[..] {
+            [Node::Paragraph(p)] => assert_eq!(spans_text(&p.content), "a _/ b"),
+            other => panic!("{other:?}")
+        }
+    }
+
+    #[test]
+    fn table_empty_cells_pad_and_cut() {
+        let (h, b, a) = table("\\№ 0\n/ a / / c /\n\\№-\n/ / /\n/ 1 / 2 / 3 / 4 /\n\\№");
+        assert_eq!(h, vec![v(&["a", "", "c"])]);
+        assert_eq!(b, vec![v(&["", "", ""]), v(&["1", "2", "3"])]);
+        assert_eq!(a, vec!["Center", "Center", "Center"]);
+    }
+
+    #[test]
+    fn table_merges_on_edges() {
+        let (h, b, _) = table(concat!(
+            "\\№ 0\n",
+            "/ \\+ / \\= / \\+= /\n",
+            "/ \\=+ / \\+ / \\= /\n",
+            "\\№-\n",
+            "/ \\= / \\+= / a /\n",
+            "/ \\+= / \\=+ / \\+ /\n",
+            "\\№"
+        ));
+        assert_eq!(h, vec![v(&["", "", ""]), v(&["", "\\+", "\\="])]);
+        assert_eq!(b, vec![v(&["", "", "a"]), v(&["", "\\+=", "\\+"])]);
+    }
+
+    #[test]
+    fn table_aligments() {
+        assert_eq!(table("\\№ 0\n/ a / b / c / d /\n\\№- Л / ц / X /\n\\№").2, vec!["Left", "Center", "Center", "Center"]);
+        assert_eq!(table("\\№ 0\n/ a / b /\n\\№- / П / Л / Л /\n\\№").2, vec!["Right", "Left"]);
+        assert_eq!(table("\\№ 0\n/ a / b /\n\\№- п\n\\№").2, vec!["Right", "Center"]);
+    }
+
+    #[test]
+    fn table_row_without_spaces_is_invalid() {
+        let out = Rush::new("\\№ 0\n/a / b /\n\\№-\n/ c /\n\\№", &empty_gp());
+        assert!(!out.nodes.iter().any(|n| matches!(n, Node::Table(_))), "{out:?}");
+    }
+
+    fn table_name<'a>(node: &'a Node<'a>) -> &'a [Span<'a>] {
+        match node {
+            Node::Table(Table { named: Named::WithName { name, .. }, .. }) => name,
+            other => panic!("{other:?}")
+        }
+    }
+
+    #[test]
+    fn element_ref_in_name_is_invalid() {
+        let gp = empty_gp();
+        let out = Rush::new("\\№ Т1\n/ a /\n\\№-\n\\№\n\\№ см. \\*т(Т1) и\\*1\n/ a /\n\\№-\n\\№\n\\**1 сноска", &gp);
+        let refs: Vec<_> = table_name(&out.nodes[1]).iter()
+            .flat_map(|s| s.text.iter())
+            .filter_map(|el| match el {
+                InlineEl::InnerLink(l) => Some(format!("link {}", l.is_some())),
+                InlineEl::Note(n) => Some(format!("note {n:?}")),
+                _ => None
+            })
+            .collect();
+        assert_eq!(refs, vec!["link false", "note Some(1)"]);
+    }
+
+    #[test]
+    fn forward_ref_is_valid() {
+        let gp = empty_gp();
+        let out = Rush::new("см. \\*т(Позже)\n\n\\№ Позже\n/ a /\n\\№-\n\\№", &gp);
+        match &out.nodes[0] {
+            Node::Paragraph(p) => assert!(p.content.iter().flat_map(|s| s.text.iter())
+                .any(|el| matches!(el, InlineEl::InnerLink(Some(InnerLink { index: 1, .. }))))),
+            other => panic!("{other:?}")
+        }
+    }
+
+    #[test]
+    fn image_caption_escaped_comma() {
+        let gp = empty_gp();
+        let out = Rush::new("\\(a.png, Схема_, вариант)", &gp);
+        match &out.nodes[..] {
+            [Node::Image(Image { meta: ImageKind { named: Named::WithName { name, .. }, .. }, .. })] =>
+                assert_eq!(spans_text(name), "Схема, вариант"),
+            other => panic!("{other:?}")
+        }
+    }
+}

@@ -100,11 +100,29 @@ fn is_should_be_changed_on_name(ch: char) -> bool {
     ch == SHIELD || ch ==MARK || ch == SMALL_YO || ch.is_uppercase()
 }
 
-fn is_inline_marking(ch: char) -> bool {
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub(crate) enum InlineContext {
+    Text,
+    TableCell,
+    Name,
+    ImageName,
+}
+
+impl InlineContext {
+    pub(crate) fn is_name(self) -> bool {
+        matches!(self, Self::Name | Self::ImageName)
+    }
+}
+
+fn is_inline_marking(ch: char, ctx: InlineContext) -> bool {
     matches!(
         ch,
         MARK | SHIELD | BOLD | ITALIC | STRIKE | UNDER | MONO | COLOR | LBRACE | RBRACE
-    )
+    ) || match ctx {
+        InlineContext::TableCell => ch == TABLE_SEP,
+        InlineContext::ImageName => ch == IMG_SEP,
+        _ => false
+    }
 }
 
 #[derive(PartialEq, Debug, Clone, Copy)]
@@ -114,20 +132,36 @@ enum InlineClearKind {
     Strike,
     Under,
     Mono,
-    Color(u32), 
+    Braced(u32),
 }
 pub(crate) fn clear_name_attribute<'a>(line: &'a str) -> Cow<'a, str> {
+    clear_name_attribute_in(line, InlineContext::Text)
+}
+
+fn collapse_blanks<'a>(line: Cow<'a, str>) -> Cow<'a, str> {
+    let is_collapsed = !line.contains(TAB)
+        && !line.contains("  ")
+        && !line.starts_with(is_blank)
+        && !line.ends_with(is_blank);
+    if is_collapsed {
+        return line;
+    }
+    Cow::Owned(line.split(is_blank).filter(|w| !w.is_empty()).collect::<Vec<_>>().join(" "))
+}
+
+
+pub(crate) fn clear_name_attribute_in<'a>(line: &'a str, ctx: InlineContext) -> Cow<'a, str> {
     let Some(first) = line.find(is_should_be_changed_on_name) else {
-        return Cow::Borrowed(line);
+        return collapse_blanks(Cow::Borrowed(line));
     };
 
     let mut out = String::with_capacity(line.len());
     out.push_str(&line[..first]);
-    
+
     let mut chars = line[first..].chars().peekable();
     let mut braces_stack: Vec<InlineClearKind> = Vec::new();
     let mut depth: u32 = 0;
-    let mut in_color = false;
+    let mut in_param = false;
 
     fn push_closer(braces_stack: &mut Vec<InlineClearKind>, out: &mut String, kind: InlineClearKind, ch: &char){
         if let Some(pos) = braces_stack.iter().rposition(|&open| open == kind) {
@@ -136,16 +170,16 @@ pub(crate) fn clear_name_attribute<'a>(line: &'a str) -> Cow<'a, str> {
             out.push(*ch);
         }
     }
-    
+
     fn push_to_stack(braces_stack: &mut Vec<InlineClearKind>, chars: &mut impl Iterator<Item = char>, what: InlineClearKind){
         braces_stack.push(what);
         chars.next();
     }
 
-    while let Some(ch) = chars.next() {
+    'outer: while let Some(ch) = chars.next() {
         match ch {
             SHIELD => {
-                if let Some(next) = chars.next_if(|&c| is_inline_marking(c)) {
+                if let Some(next) = chars.next_if(|&c| is_inline_marking(c, ctx)) {
                     out.push(next);
                 } else {
                     out.push(ch);
@@ -160,17 +194,58 @@ pub(crate) fn clear_name_attribute<'a>(line: &'a str) -> Cow<'a, str> {
                         UNDER => push_to_stack(&mut braces_stack, &mut chars, InlineClearKind::Under),
                         MONO => push_to_stack(&mut braces_stack, &mut chars, InlineClearKind::Mono),
                         COLOR => {
-                            push_to_stack(&mut braces_stack, &mut chars, InlineClearKind::Color(depth));
-                            in_color = true;
+                            push_to_stack(&mut braces_stack, &mut chars, InlineClearKind::Braced(depth));
+                            in_param = true;
+                        },
+                        LINK => {
+                            push_to_stack(&mut braces_stack, &mut chars, InlineClearKind::Braced(depth));
+                            if chars.next_if_eq(&QUOTES).is_some() {
+                                if !chars.by_ref().any(|c| c == QUOTES) || chars.next_if_eq(&LBRACE).is_none() {
+                                    break 'outer;
+                                }
+                                depth += 1;
+                            } else {
+                                in_param = true;
+                            }
+                        },
+                        NOTE => {
+                            chars.next();
+                            let mut ahead = chars.clone();
+                            if let Some(kind) = ahead.next() && ref_kind(kind).is_some() && ahead.next() == Some(LBRACE) {
+                                chars = ahead;
+                                let mut ref_depth: u32 = 1;
+                                while let Some(c) = chars.next() {
+                                    match c {
+                                        SHIELD => { chars.next_if(|&c| is_inline_marking(c, ctx)); },
+                                        LBRACE => ref_depth += 1,
+                                        RBRACE => {
+                                            ref_depth -= 1;
+                                            if ref_depth == 0 {
+                                                break;
+                                            }
+                                        },
+                                        _ => ()
+                                    }
+                                }
+                            } else {
+                                let mut digits = String::new();
+                                while let Some(d) = chars.next_if(|c| c.is_ascii_digit()) {
+                                    digits.push(d);
+                                }
+                                if !digits.is_empty() && digits.parse::<u16>().is_err() {
+                                    out.push(NOTE);
+                                    out.push_str(&digits);
+                                }
+                            }
                         },
                         _ => ()
                     }
                 }
             },
             _ => {
-                if in_color { 
+                if in_param {
                     if ch == LBRACE{
-                        in_color = false;
+                        in_param = false;
                         depth += 1;
                     }
                 }
@@ -183,9 +258,9 @@ pub(crate) fn clear_name_attribute<'a>(line: &'a str) -> Cow<'a, str> {
                         },
                         RBRACE => {
                             depth = depth.saturating_sub(1);
-                            let color = braces_stack.iter().rposition(|e| matches!(e, InlineClearKind::Color(_)));
-                            match color {
-                                Some(pos) if braces_stack[pos] == InlineClearKind::Color(depth) => braces_stack.truncate(pos),
+                            let braced = braces_stack.iter().rposition(|e| matches!(e, InlineClearKind::Braced(_)));
+                            match braced {
+                                Some(pos) if braces_stack[pos] == InlineClearKind::Braced(depth) => braces_stack.truncate(pos),
                                 _ => out.push(ch),
                             }
                         },
@@ -201,7 +276,7 @@ pub(crate) fn clear_name_attribute<'a>(line: &'a str) -> Cow<'a, str> {
             }
         }
     }
-    return Cow::Owned(out);
+    return collapse_blanks(Cow::Owned(out));
 }
 
 pub(crate) fn clear_name_link<'a>(line: &'a str) -> Cow<'a, str> {
@@ -318,17 +393,17 @@ impl<'a> PreparsedLines<'a> {
             Some((Mark::Link(&line[link_start..quote_i]), brace_i + LBRACE.len_utf8()))
         } else {
             let (brace_i, _) = chars.find(|&(_, c)| c == LBRACE)?;
-            Some((Mark::Link(&line[value_start..brace_i]), brace_i + LBRACE.len_utf8()))
+            Some((Mark::Link(line[value_start..brace_i].trim_matches(is_blank)), brace_i + LBRACE.len_utf8()))
         }
     }
 
-    fn find_link_end(line: &str, start: usize) -> usize {
+    fn find_link_end(line: &str, start: usize, ctx: InlineContext) -> usize {
         let mut depth: u32 = 1;
         let mut chars = line[start..].char_indices().peekable();
         while let Some((j, ch)) = chars.next() {
             match ch {
                 SHIELD => {
-                    chars.next_if(|&(_, c)| is_inline_marking(c));
+                    chars.next_if(|&(_, c)| is_inline_marking(c, ctx));
                 },
                 LBRACE => depth += 1,
                 RBRACE => {
@@ -343,7 +418,7 @@ impl<'a> PreparsedLines<'a> {
         line.len()
     }
 
-    pub(crate) fn new(lines: Vec<&'a str>) -> Self {
+    pub(crate) fn new(lines: Vec<&'a str>, ctx: InlineContext) -> Self {
         let mut out = Self {
             text: Vec::new(),
             style_ranges: Vec::new()
@@ -386,9 +461,9 @@ impl<'a> PreparsedLines<'a> {
                                        let Some(kind) = ref_kind(l_c) && line[l_i + l_c.len_utf8()..].starts_with(LBRACE)
                                     {
                                         let name_start = l_i + l_c.len_utf8() + LBRACE.len_utf8();
-                                        let name_end = Self::find_link_end(line, name_start);
+                                        let name_end = Self::find_link_end(line, name_start, ctx);
                                         while chars.next_if(|&(j, _)| j <= name_end).is_some() {}
-                                        let name = clear_name_attribute(&line[name_start..name_end]);
+                                        let name = clear_name_attribute_in(&line[name_start..name_end], ctx);
                                         out.text.push(InlinePreEl::InnerLink(name, kind));
                                         byte_after_last_tag = (name_end + RBRACE.len_utf8()).min(line.len());
                                     } else if let Some((start, _)) = chars.next_if(|&(_, c)| c.is_ascii_digit()) {
@@ -396,12 +471,15 @@ impl<'a> PreparsedLines<'a> {
                                         while let Some(_) = chars.next_if(|&(_, c)| c.is_ascii_digit()){
                                             end += 1;
                                         }
-                                        let n = line[start..end].parse::<u16>().unwrap_or(u16::MAX);
-                                        out.text.push(InlinePreEl::Note(n));
-                                        if let Some(_) = chars.next_if(|&(_, c)| c == SPACE) {
-                                            byte_after_last_tag = end + SPACE.len_utf8();    
+                                        if let Ok(n) = line[start..end].parse::<u16>() {
+                                            out.text.push(InlinePreEl::Note(n));
+                                            if let Some(_) = chars.next_if(|&(_, c)| c == SPACE) {
+                                                byte_after_last_tag = end + SPACE.len_utf8();
+                                            } else {
+                                                byte_after_last_tag = end;
+                                            }
                                         } else {
-                                            byte_after_last_tag = end;
+                                            byte_after_last_tag = i + MARK.len_utf8();
                                         }
                                     } else {
                                         byte_after_last_tag = i + MARK.len_utf8() + NOTE.len_utf8();
@@ -419,10 +497,13 @@ impl<'a> PreparsedLines<'a> {
                                     }
                                 }
                             }
+                        } else {
+                            Self::push_range_to_out(&mut out, line, byte_after_last_tag, i);
+                            byte_after_last_tag = line.len();
                         }
                     },
                     SHIELD => {
-                        if chars.next_if(|&(_, c)| is_inline_marking(c)).is_some() {
+                        if chars.next_if(|&(_, c)| is_inline_marking(c, ctx)).is_some() {
                             Self::push_range_to_out(&mut out, line, byte_after_last_tag, i);
                             byte_after_last_tag = i + SHIELD.len_utf8();
                         }
@@ -658,7 +739,7 @@ pub(crate) fn generate_pre_spans<'a>(preparsed: PreparsedLines<'a>) -> Vec<PreSp
     fn blue() -> Option<Color> { Some(Color::DARK_BLUE) }
 
     fn check_pre<'a>(lines: Vec<&'a str>, text: Vec<InlinePreEl<'a>>, style_ranges: Vec<Range<'a>>) {
-        let out = PreparsedLines::new(lines.clone());
+        let out = PreparsedLines::new(lines.clone(), InlineContext::Text);
         assert_eq!(out, PreparsedLines { text, style_ranges }, "вход: {lines:?}");
     }
 
@@ -679,7 +760,7 @@ pub(crate) fn generate_pre_spans<'a>(preparsed: PreparsedLines<'a>) -> Vec<PreSp
     }
 
     fn check_spans<'a>(lines: Vec<&'a str>, expected: Vec<(Vec<InlinePreEl<'a>>, PreStyle<'a>)>) {
-        let out: Vec<_> = generate_pre_spans(PreparsedLines::new(lines.clone()))
+        let out: Vec<_> = generate_pre_spans(PreparsedLines::new(lines.clone(), InlineContext::Text))
             .into_iter()
             .map(|span| (span.text, span.style))
             .collect();
@@ -1039,7 +1120,7 @@ pub(crate) fn generate_pre_spans<'a>(preparsed: PreparsedLines<'a>) -> Vec<PreSp
 
     #[test]
     fn check_line_clear_unknown_gliph_after_mark(){
-        check("\\*p(A)", "*p(a)");
+        check("\\*p(A)", "p(a)");
     }
 
     #[test]
@@ -1145,5 +1226,66 @@ pub(crate) fn generate_pre_spans<'a>(preparsed: PreparsedLines<'a>) -> Vec<PreSp
     #[test]
     fn check_line_clear_name_link_shield_rbrace(){
         assert_eq!(clear_name_link("(a_)a"), "(a)a");
+    }
+
+    #[test]
+    fn check_line_trailing_mark_dropped() {
+        check_pre(vec!["аб\\"], vec![s("аб"), Space], vec![]);
+        check_pre(vec!["аб_\\"], vec![s("аб"), s("\\"), Space], vec![]);
+    }
+
+    #[test]
+    fn check_line_note_ref_overflow_is_text() {
+        check_pre(vec!["a\\*70000 b"], vec![s("a"), s("*70000 b"), Space], vec![]);
+        check_pre(vec!["a\\*65535"], vec![s("a"), Note(65535), Space], vec![]);
+    }
+
+    #[test]
+    fn check_line_note_ref_leading_zero() {
+        check_pre(vec!["a\\*01"], vec![s("a"), Note(1), Space], vec![]);
+    }
+
+    #[test]
+    fn check_line_color_rgb_channel_overflow() {
+        assert_eq!(Color::from_unknown_string("999000000"), None);
+        assert_eq!(Color::from_unknown_string("КРАС "), None);
+        assert_eq!(Color::from_unknown_string("ЖЕЛ"), Some(Color::YELLOW));
+    }
+
+    #[test]
+    fn check_line_link_target_trimmed() {
+        check_pre(vec!["\\, a.ru (x)"], vec![s("x"), Space], vec![r(Mark::Link("a.ru"), 0, 1)]);
+        check_pre(vec!["\\,\" a.ru \"(x)"], vec![s("x"), Space], vec![r(Mark::Link(" a.ru "), 0, 1)]);
+    }
+
+    #[test]
+    fn check_line_clear_name_link_text_only() {
+        check("\\,сайт.ru(Схема) узла", "схема узла");
+        check("\\,\"a(b)\"(Схема) узла", "схема узла");
+        check("\\,a.ru(x \\,b.ru(y) z)", "x y z");
+    }
+
+    #[test]
+    fn check_line_clear_name_refs_removed() {
+        check("Схема\\*1 узла", "схема узла");
+        check("Схема \\*р(Другая (1)) узла", "схема узла");
+        check("Схема\\*70000", "схема*70000");
+    }
+
+    #[test]
+    fn check_line_clear_name_collapse_blanks() {
+        check("  Схема  \t узла ", "схема узла");
+        check("Схема \\:\\: узла", "схема узла");
+    }
+
+    #[test]
+    fn check_line_clear_name_latin_case() {
+        check("Scheme ABC", "scheme abc");
+    }
+
+    #[test]
+    fn check_line_clear_name_image_comma() {
+        assert_eq!(clear_name_attribute_in("Схема_, вариант", InlineContext::ImageName), "схема, вариант");
+        assert_eq!(clear_name_attribute_in("Схема_, вариант", InlineContext::Name), "схема_, вариант");
     }
 }

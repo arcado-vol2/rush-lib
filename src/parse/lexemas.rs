@@ -41,7 +41,7 @@ pub(crate) const EXT_DIV: char = '.';
 pub(crate) const BYTE_SHIELD: u8 = b'_';
 
 pub(crate) fn is_blank(c: char) -> bool{
-    matches!(c, SPACE | TAB | CR)
+    matches!(c, SPACE | TAB)
 }
 
 
@@ -90,13 +90,15 @@ pub(crate)const NUMERIC_LIST_TAG: Tag<1> = Tag::repeat(NUMERIC_LIST);
 pub(crate)const ANON_NAME_TAG: Tag<1> = Tag::repeat(ANON);
 /// `\№-`
 pub(crate)const TABLE_FUL_SEP: Tag<3> = Tag::seq([MARK, TABLE, TABLE_FORMAT]);
-/// `+=` or `=+`
-pub(crate)const TABLE_MERGE_UP_LEFT_TAG: Tag<2, 2> = Tag::any([
-    [TABLE_MERGE_LEFT, TABLE_MERGE_UP],
-    [TABLE_MERGE_UP, TABLE_MERGE_LEFT],
+/// `\+=` or `\=+`
+pub(crate)const TABLE_MERGE_UP_LEFT_TAG: Tag<3, 2> = Tag::any([
+    [MARK, TABLE_MERGE_LEFT, TABLE_MERGE_UP],
+    [MARK, TABLE_MERGE_UP, TABLE_MERGE_LEFT],
 ]);
-pub(crate)const TABLE_MERGE_LEFT_TAG: Tag<1> = Tag::repeat(TABLE_MERGE_LEFT);
-pub(crate)const TABLE_MERGE_UP_TAG: Tag<1> = Tag::repeat(TABLE_MERGE_UP);
+/// `\+`
+pub(crate)const TABLE_MERGE_LEFT_TAG: Tag<2> = Tag::seq([MARK, TABLE_MERGE_LEFT]);
+/// `\=`
+pub(crate)const TABLE_MERGE_UP_TAG: Tag<2> = Tag::seq([MARK, TABLE_MERGE_UP]);
 
 
 

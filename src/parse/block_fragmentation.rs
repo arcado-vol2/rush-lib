@@ -1,6 +1,6 @@
 use std::{collections::{HashMap, HashSet}, vec};
 use std::borrow::Cow;
-use crate::parse::{lexemas::*, line_parse::clear_name_attribute, common::*};
+use crate::parse::{lexemas::*, line_parse::{InlineContext, clear_name_attribute_in}, common::*};
 
 
 
@@ -75,9 +75,13 @@ impl <'a> InnerProjectLinks<'a> {
 
     fn register_named(&mut self, kind: RefKind, raw_name: &'a str) -> Named<&'a str> {
         let linkable = self.named_linkable_mut(kind);
+        let ctx = match kind {
+            RefKind::Image => InlineContext::ImageName,
+            _ => InlineContext::Name
+        };
         match resolve_name(raw_name) {
             Some(name) if linkable.counter < u16::MAX => {
-                let id = linkable.register(clear_name_attribute(name));
+                let id = linkable.register(clear_name_attribute_in(name, ctx));
                 Named::WithName { name, index: id }
             },
             _ => Named::Anonymous
@@ -161,6 +165,38 @@ enum OpenBlockKind {
     Table
 }
 
+
+fn is_table_row(line: &str) -> bool {
+    let Some(inner) = line.strip_prefix(TABLE_SEP).and_then(|s| s.strip_suffix(TABLE_SEP)) else {
+        return false;
+    };
+    inner.starts_with(is_blank) && inner.ends_with(is_blank)
+}
+
+pub(crate) fn split_image_params(s: &str) -> Vec<&str> {
+    let mut out = Vec::new();
+    let mut start = 0;
+    let mut prev: Option<char> = None;
+    for (i, ch) in s.char_indices() {
+        if ch == IMG_SEP && prev != Some(SHIELD) {
+            out.push(&s[start..i]);
+            start = i + ch.len_utf8();
+        }
+        prev = Some(ch);
+    }
+    out.push(&s[start..]);
+    out
+}
+
+pub(crate) fn unescape_image_path(path: &str) -> Cow<'_, str> {
+    let escaped: String = [SHIELD, IMG_SEP].iter().collect();
+    if path.contains(escaped.as_str()) {
+        Cow::Owned(path.replace(escaped.as_str(), &IMG_SEP.to_string()))
+    } else {
+        Cow::Borrowed(path)
+    }
+}
+
 #[derive(Debug)]
 struct ClassifiedLine<'a> {
     raw: &'a str,
@@ -176,12 +212,12 @@ impl<'a> ClassifiedLine<'a> {
         let formated = raw.trim_matches(|c| is_blank(c));
         if formated.is_empty(){
             return Self {raw, formated, thinned: formated, kind: LineKind::Empty};
-        } else if formated.starts_with(TABLE_SEP){
+        } else if is_table_row(formated) {
             return Self {raw, formated, thinned: formated, kind: LineKind::TableLine};
         } else if formated.starts_with(MARK) {
             let mut s = &formated[1..];
-            if s.starts_with(SPACE) {
-                s = s.trim_start_matches(SPACE);
+            if s.starts_with(is_blank) {
+                s = s.trim_start_matches(is_blank);
                 if !(s.starts_with(NUMERIC_LIST) || s.starts_with(BULLET_LIST)){
                     return Self { raw, formated, thinned: formated, kind: LineKind::Regular };
                 }
@@ -189,32 +225,20 @@ impl<'a> ClassifiedLine<'a> {
             let end = s.find(|c| is_blank(c)).unwrap_or(s.len());
             let (first_w, tail) = s.split_at(end);
             let rest = tail.trim_start_matches(|c| is_blank(c));
-            if s.starts_with(LBRACE) && s.ends_with(RBRACE){
-                let sep_count = s.matches(IMG_SEP).count();
-                
-                if sep_count == 1 || sep_count == 2 {
-                    let thinned = 'get_first_and_last: {
-                        let mut t = s.char_indices();
-                        let first_end = match t.next(){
-                            Some((_, ch)) => ch.len_utf8(),
-                            None => break 'get_first_and_last s
+            if s.len() >= LBRACE.len_utf8() + RBRACE.len_utf8() && s.starts_with(LBRACE) && s.ends_with(RBRACE){
+                let thinned = &s[LBRACE.len_utf8()..s.len() - RBRACE.len_utf8()];
+                let params = split_image_params(thinned);
+                match params.len() {
+                    1 | 2 => return Self {raw, formated, thinned, kind: LineKind::Image(100)},
+                    3 => {
+                        let head = &thinned[..params[0].len() + IMG_SEP.len_utf8() + params[1].len()];
+                        let scale = match params[2].trim_matches(is_blank).parse::<u16>() {
+                            Ok(scale) if scale > 0 => scale,
+                            _ => 100
                         };
-                        let Some((last_start,_)) = t.next_back() else {
-                            break  'get_first_and_last s;
-                        };
-                        
-                        &s[first_end..last_start]
-                    };
-                    let content: Vec<&str> = thinned.split(IMG_SEP).collect();
-                    if content.len() == 3 {
-                        let (head, last) = thinned.rsplit_once(IMG_SEP).unwrap();
-                        if let Ok(scale) = last.trim().parse::<u16>() && scale > 0{
-                            return  Self {raw, formated, thinned: head, kind: LineKind::Image(scale)};
-                        } else {
-                            return Self {raw, formated, thinned: head, kind: LineKind::Image(100)} ;
-                        }
-                    }
-                    return Self {raw, formated, thinned, kind: LineKind::Image(100)} ;
+                        return Self {raw, formated, thinned: head, kind: LineKind::Image(scale)};
+                    },
+                    _ => ()
                 }
             } else if !first_w.is_empty() {
                 if rest.is_empty() {
@@ -357,10 +381,12 @@ pub(crate) fn split_blocks<'a>(source: &'a str) -> FlatLexedProject<'a> {
                         }
                     }, 
                     LineKind::Image(scale) => {
-                        let mut parts = line.thinned.split(IMG_SEP);
-                        let path = parts.next().unwrap().trim_matches(|c| is_blank(c));
-                        let name = parts.next().unwrap().trim_matches(|c| is_blank(c));
-                        let named = project.links.register_named(RefKind::Image, name);
+                        let parts = split_image_params(line.thinned);
+                        let path = parts[0].trim_matches(is_blank);
+                        let named = match parts.get(1) {
+                            Some(name) => project.links.register_named(RefKind::Image, name.trim_matches(is_blank)),
+                            None => Named::Anonymous
+                        };
                         flush(&mut project.blocks, Some(path), BlockKind::Image(ImageKind {scale, named}), &mut par_is_open);
                     },
                     LineKind::List => {
@@ -440,7 +466,7 @@ pub(crate) fn split_blocks<'a>(source: &'a str) -> FlatLexedProject<'a> {
             OpenBlockKind::Code => {
                         match line.kind {
                             LineKind::CodeClose => inner_block = OpenBlockKind::None,
-                            _ => merge_flush(&mut project.blocks, line.raw)
+                            _ => merge_flush(&mut project.blocks, line.raw.trim_end_matches(is_blank))
                         }
                         
                     },
@@ -957,7 +983,7 @@ use crate::parse::{common::*, block_fragmentation::{FlatLexedProject, InnerProje
             blocks: vec![
                 Block {
                     kind: BlockKind::Code(Named::WithName { name: "aa", index: 1 }),
-                    lines: vec!["  ", "bb", "cc"]
+                    lines: vec!["", "bb", "cc"]
                 }
             ],
             ..Default::default()
@@ -1584,14 +1610,14 @@ use crate::parse::{common::*, block_fragmentation::{FlatLexedProject, InnerProje
 
     #[test]
     fn block_check_table_basic() {
-        let source = "\\№ tt\n/aa/bb/\n\\№- Л / Л\n/cc/dd/\n\\№";
+        let source = "\\№ tt\n/ aa / bb /\n\\№- Л / Л\n/ cc / dd /\n\\№";
         let out = split_blocks(source);
         let expected = FlatLexedProject {
             links: InnerProjectLinks { tables: refs(&[("tt", 1)]), ..Default::default() },
             blocks: vec![
                 Block {
                     kind: BlockKind::Table(Named::WithName { name: "tt", index: 1 }),
-                    lines: vec!["/aa/bb/", "\\№- Л / Л", "/cc/dd/"]
+                    lines: vec!["/ aa / bb /", "\\№- Л / Л", "/ cc / dd /"]
                 }
             ],
             ..Default::default()
@@ -1751,12 +1777,12 @@ use crate::parse::{common::*, block_fragmentation::{FlatLexedProject, InnerProje
 
     #[test]
     fn block_check_table_p_space_after_mark() {
-        let source = "\\ № tt\n/aa/\n\\№-\n/bb/\n\\№";
+        let source = "\\ № tt\n/ aa /\n\\№-\n/ bb /\n\\№";
         let out = split_blocks(source);
         let expected = project(vec![
             Block {
                 kind: BlockKind::Paragraph,
-                lines: vec!["\\ № tt", "/aa/", "\\№-", "/bb/", "\\№"]
+                lines: vec!["\\ № tt", "/ aa /", "\\№-", "/ bb /", "\\№"]
             }
         ]);
         assert_eq!(out, expected);
@@ -2053,7 +2079,7 @@ use crate::parse::{common::*, block_fragmentation::{FlatLexedProject, InnerProje
 
     #[test]
     fn block_check_list_table_after() {
-        let source = "\\. aa\n\\№ tt\n/bb/\n\\№-\n/cc/\n\\№\n\\. dd";
+        let source = "\\. aa\n\\№ tt\n/ bb /\n\\№-\n/ cc /\n\\№\n\\. dd";
         let out = split_blocks(source);
         let expected = FlatLexedProject {
             links: InnerProjectLinks { tables: refs(&[("tt", 1)]), ..Default::default() },
@@ -2064,7 +2090,7 @@ use crate::parse::{common::*, block_fragmentation::{FlatLexedProject, InnerProje
                 },
                 Block {
                     kind: BlockKind::Table(Named::WithName { name: "tt", index: 1 }),
-                    lines: vec!["/bb/", "\\№-", "/cc/"]
+                    lines: vec!["/ bb /", "\\№-", "/ cc /"]
                 },
                 Block {
                     kind: BlockKind::List,
@@ -2202,8 +2228,8 @@ use crate::parse::{common::*, block_fragmentation::{FlatLexedProject, InnerProje
         let out = split_blocks(source);
         let expected = project(vec![
             Block {
-                kind: BlockKind::Paragraph,
-                lines: vec!["\\(aa)"]
+                kind: BlockKind::Image(ImageKind { named: Named::Anonymous, scale: 100 }),
+                lines: vec!["aa"]
             }
         ]);
         assert_eq!(out, expected);
@@ -2666,14 +2692,14 @@ use crate::parse::{common::*, block_fragmentation::{FlatLexedProject, InnerProje
 
     #[test]
     fn block_check_table_no_format() {
-        let source = "\\№ tt\n/aa/bb/\n\\№-\n/cc/dd/\n\\№";
+        let source = "\\№ tt\n/ aa / bb /\n\\№-\n/ cc / dd /\n\\№";
         let out = split_blocks(source);
         let expected = FlatLexedProject {
             links: InnerProjectLinks { tables: refs(&[("tt", 1)]), ..Default::default() },
             blocks: vec![
                 Block {
                     kind: BlockKind::Table(Named::WithName { name: "tt", index: 1 }),
-                    lines: vec!["/aa/bb/", "\\№-", "/cc/dd/"]
+                    lines: vec!["/ aa / bb /", "\\№-", "/ cc / dd /"]
                 }
             ],
             ..Default::default()
@@ -2683,14 +2709,14 @@ use crate::parse::{common::*, block_fragmentation::{FlatLexedProject, InnerProje
 
     #[test]
     fn block_check_table_multiple_header_lines() {
-        let source = "\\№ tt\n/aa/bb/\n/cc/dd/\n\\№- Л / П\n/ee/ff/\n\\№";
+        let source = "\\№ tt\n/ aa / bb /\n/ cc / dd /\n\\№- Л / П\n/ ee / ff /\n\\№";
         let out = split_blocks(source);
         let expected = FlatLexedProject {
             links: InnerProjectLinks { tables: refs(&[("tt", 1)]), ..Default::default() },
             blocks: vec![
                 Block {
                     kind: BlockKind::Table(Named::WithName { name: "tt", index: 1 }),
-                    lines: vec!["/aa/bb/", "/cc/dd/", "\\№- Л / П", "/ee/ff/"]
+                    lines: vec!["/ aa / bb /", "/ cc / dd /", "\\№- Л / П", "/ ee / ff /"]
                 }
             ],
             ..Default::default()
@@ -2700,14 +2726,14 @@ use crate::parse::{common::*, block_fragmentation::{FlatLexedProject, InnerProje
 
     #[test]
     fn block_check_table_empty_body() {
-        let source = "\\№ tt\n/aa/bb/\n\\№-\n\\№";
+        let source = "\\№ tt\n/ aa / bb /\n\\№-\n\\№";
         let out = split_blocks(source);
         let expected = FlatLexedProject {
             links: InnerProjectLinks { tables: refs(&[("tt", 1)]), ..Default::default() },
             blocks: vec![
                 Block {
                     kind: BlockKind::Table(Named::WithName { name: "tt", index: 1 }),
-                    lines: vec!["/aa/bb/", "\\№-"]
+                    lines: vec!["/ aa / bb /", "\\№-"]
                 }
             ],
             ..Default::default()
@@ -2717,12 +2743,12 @@ use crate::parse::{common::*, block_fragmentation::{FlatLexedProject, InnerProje
 
     #[test]
     fn block_check_table_anon() {
-        let source = "\\№ 0\n/aa/\n\\№-\n/bb/\n\\№";
+        let source = "\\№ 0\n/ aa /\n\\№-\n/ bb /\n\\№";
         let out = split_blocks(source);
         let expected = project(vec![
             Block {
                 kind: BlockKind::Table(Named::Anonymous),
-                lines: vec!["/aa/", "\\№-", "/bb/"]
+                lines: vec!["/ aa /", "\\№-", "/ bb /"]
             }
         ]);
         assert_eq!(out, expected);
@@ -2730,14 +2756,14 @@ use crate::parse::{common::*, block_fragmentation::{FlatLexedProject, InnerProje
 
     #[test]
     fn block_check_table_trim() {
-        let source = "  \\№ tt \t\n\t/aa/bb/  \n \\№- Л \n  /cc/dd/\t\n  \\№  ";
+        let source = "  \\№ tt \t\n\t/ aa / bb /  \n \\№- Л \n  / cc / dd /\t\n  \\№  ";
         let out = split_blocks(source);
         let expected = FlatLexedProject {
             links: InnerProjectLinks { tables: refs(&[("tt", 1)]), ..Default::default() },
             blocks: vec![
                 Block {
                     kind: BlockKind::Table(Named::WithName { name: "tt", index: 1 }),
-                    lines: vec!["/aa/bb/", "\\№- Л", "/cc/dd/"]
+                    lines: vec!["/ aa / bb /", "\\№- Л", "/ cc / dd /"]
                 }
             ],
             ..Default::default()
@@ -2747,14 +2773,14 @@ use crate::parse::{common::*, block_fragmentation::{FlatLexedProject, InnerProje
 
     #[test]
     fn block_check_table_trim_card_return() {
-        let source = "\\№ tt\r\n/aa/\r\n\\№-\r\n/bb/\r\n\\№\r\n";
+        let source = "\\№ tt\r\n/ aa /\r\n\\№-\r\n/ bb /\r\n\\№\r\n";
         let out = split_blocks(source);
         let expected = FlatLexedProject {
             links: InnerProjectLinks { tables: refs(&[("tt", 1)]), ..Default::default() },
             blocks: vec![
                 Block {
                     kind: BlockKind::Table(Named::WithName { name: "tt", index: 1 }),
-                    lines: vec!["/aa/", "\\№-", "/bb/"]
+                    lines: vec!["/ aa /", "\\№-", "/ bb /"]
                 }
             ],
             ..Default::default()
@@ -2764,12 +2790,12 @@ use crate::parse::{common::*, block_fragmentation::{FlatLexedProject, InnerProje
 
     #[test]
     fn block_check_table_p_need_space() {
-        let source = "\\№tt\n/aa/\n\\№-\n/bb/\n\\№";
+        let source = "\\№tt\n/ aa /\n\\№-\n/ bb /\n\\№";
         let out = split_blocks(source);
         let expected = project(vec![
             Block {
                 kind: BlockKind::Paragraph,
-                lines: vec!["\\№tt", "/aa/", "\\№-", "/bb/", "\\№"]
+                lines: vec!["\\№tt", "/ aa /", "\\№-", "/ bb /", "\\№"]
             }
         ]);
         assert_eq!(out, expected);
@@ -2777,12 +2803,12 @@ use crate::parse::{common::*, block_fragmentation::{FlatLexedProject, InnerProje
 
     #[test]
     fn block_check_table_p_no_header() {
-        let source = "\\№ tt\n\\№-\n/aa/\n\\№";
+        let source = "\\№ tt\n\\№-\n/ aa /\n\\№";
         let out = split_blocks(source);
         let expected = project(vec![
             Block {
                 kind: BlockKind::Paragraph,
-                lines: vec!["\\№ tt", "\\№-", "/aa/", "\\№"]
+                lines: vec!["\\№ tt", "\\№-", "/ aa /", "\\№"]
             }
         ]);
         assert_eq!(out, expected);
@@ -2790,12 +2816,12 @@ use crate::parse::{common::*, block_fragmentation::{FlatLexedProject, InnerProje
 
     #[test]
     fn block_check_table_p_not_closed() {
-        let source = "\\№ tt\n/aa/\n\\№-\n/bb/";
+        let source = "\\№ tt\n/ aa /\n\\№-\n/ bb /";
         let out = split_blocks(source);
         let expected = project(vec![
             Block {
                 kind: BlockKind::Paragraph,
-                lines: vec!["\\№ tt", "/aa/", "\\№-", "/bb/"]
+                lines: vec!["\\№ tt", "/ aa /", "\\№-", "/ bb /"]
             }
         ]);
         assert_eq!(out, expected);
@@ -2803,12 +2829,12 @@ use crate::parse::{common::*, block_fragmentation::{FlatLexedProject, InnerProje
 
     #[test]
     fn block_check_table_p_no_format() {
-        let source = "\\№ tt\n/aa/\n/bb/\n\\№";
+        let source = "\\№ tt\n/ aa /\n/ bb /\n\\№";
         let out = split_blocks(source);
         let expected = project(vec![
             Block {
                 kind: BlockKind::Paragraph,
-                lines: vec!["\\№ tt", "/aa/", "/bb/", "\\№"]
+                lines: vec!["\\№ tt", "/ aa /", "/ bb /", "\\№"]
             }
         ]);
         assert_eq!(out, expected);
@@ -2816,16 +2842,16 @@ use crate::parse::{common::*, block_fragmentation::{FlatLexedProject, InnerProje
 
     #[test]
     fn block_check_table_p_blank_inside() {
-        let source = "\\№ tt\n/aa/\n\n\\№-\n/bb/\n\\№";
+        let source = "\\№ tt\n/ aa /\n\n\\№-\n/ bb /\n\\№";
         let out = split_blocks(source);
         let expected = project(vec![
             Block {
                 kind: BlockKind::Paragraph,
-                lines: vec!["\\№ tt", "/aa/"]
+                lines: vec!["\\№ tt", "/ aa /"]
             },
             Block {
                 kind: BlockKind::Paragraph,
-                lines: vec!["\\№-", "/bb/", "\\№"]
+                lines: vec!["\\№-", "/ bb /", "\\№"]
             }
         ]);
         assert_eq!(out, expected);
@@ -2833,12 +2859,12 @@ use crate::parse::{common::*, block_fragmentation::{FlatLexedProject, InnerProje
 
     #[test]
     fn block_check_table_p_text_inside() {
-        let source = "\\№ tt\n/aa/\nbb\n\\№-\n/cc/\n\\№";
+        let source = "\\№ tt\n/ aa /\nbb\n\\№-\n/ cc /\n\\№";
         let out = split_blocks(source);
         let expected = project(vec![
             Block {
                 kind: BlockKind::Paragraph,
-                lines: vec!["\\№ tt", "/aa/", "bb", "\\№-", "/cc/", "\\№"]
+                lines: vec!["\\№ tt", "/ aa /", "bb", "\\№-", "/ cc /", "\\№"]
             }
         ]);
         assert_eq!(out, expected);
@@ -2846,12 +2872,12 @@ use crate::parse::{common::*, block_fragmentation::{FlatLexedProject, InnerProje
 
     #[test]
     fn block_check_table_header_p_block_inside() {
-        let source = "\\№ tt\n/aa/\n\\+ bb\n\\№-\n/cc/\n\\№";
+        let source = "\\№ tt\n/ aa /\n\\+ bb\n\\№-\n/ cc /\n\\№";
         let out = split_blocks(source);
         let expected = project(vec![
             Block {
                 kind: BlockKind::Paragraph,
-                lines: vec!["\\№ tt", "/aa/"]
+                lines: vec!["\\№ tt", "/ aa /"]
             },
             Block {
                 kind: BlockKind::Header(1),
@@ -2859,7 +2885,7 @@ use crate::parse::{common::*, block_fragmentation::{FlatLexedProject, InnerProje
             },
             Block {
                 kind: BlockKind::Paragraph,
-                lines: vec!["\\№-", "/cc/", "\\№"]
+                lines: vec!["\\№-", "/ cc /", "\\№"]
             }
         ]);
         assert_eq!(out, expected);
@@ -2867,12 +2893,12 @@ use crate::parse::{common::*, block_fragmentation::{FlatLexedProject, InnerProje
 
     #[test]
     fn block_check_table_p_two_formats() {
-        let source = "\\№ tt\n/aa/\n\\№-\n/bb/\n\\№-\n/cc/\n\\№";
+        let source = "\\№ tt\n/ aa /\n\\№-\n/ bb /\n\\№-\n/ cc /\n\\№";
         let out = split_blocks(source);
         let expected = project(vec![
             Block {
                 kind: BlockKind::Paragraph,
-                lines: vec!["\\№ tt", "/aa/", "\\№-", "/bb/", "\\№-", "/cc/", "\\№"]
+                lines: vec!["\\№ tt", "/ aa /", "\\№-", "/ bb /", "\\№-", "/ cc /", "\\№"]
             }
         ]);
         assert_eq!(out, expected);
@@ -2880,12 +2906,12 @@ use crate::parse::{common::*, block_fragmentation::{FlatLexedProject, InnerProje
 
     #[test]
     fn block_check_table_p_wrong_order() {
-        let source = "\\№ tt\n/aa/\n\\№\n\\№-\n/bb/";
+        let source = "\\№ tt\n/ aa /\n\\№\n\\№-\n/ bb /";
         let out = split_blocks(source);
         let expected = project(vec![
             Block {
                 kind: BlockKind::Paragraph,
-                lines: vec!["\\№ tt", "/aa/", "\\№", "\\№-", "/bb/"]
+                lines: vec!["\\№ tt", "/ aa /", "\\№", "\\№-", "/ bb /"]
             }
         ]);
         assert_eq!(out, expected);
@@ -2894,12 +2920,12 @@ use crate::parse::{common::*, block_fragmentation::{FlatLexedProject, InnerProje
 
     #[test]
     fn block_check_table_p_invalid_continue_par() {
-        let source = "aa\n\\№ tt\n/bb/";
+        let source = "aa\n\\№ tt\n/ bb /";
         let out = split_blocks(source);
         let expected = project(vec![
             Block {
                 kind: BlockKind::Paragraph,
-                lines: vec!["aa", "\\№ tt", "/bb/"]
+                lines: vec!["aa", "\\№ tt", "/ bb /"]
             }
         ]);
         assert_eq!(out, expected);
@@ -2928,7 +2954,7 @@ use crate::parse::{common::*, block_fragmentation::{FlatLexedProject, InnerProje
 
     #[test]
     fn block_check_table_p_split() {
-        let source = "aa\n\\№ tt\n/bb/\n\\№-\n/cc/\n\\№\ndd";
+        let source = "aa\n\\№ tt\n/ bb /\n\\№-\n/ cc /\n\\№\ndd";
         let out = split_blocks(source);
         let expected = FlatLexedProject {
             links: InnerProjectLinks { tables: refs(&[("tt", 1)]), ..Default::default() },
@@ -2939,7 +2965,7 @@ use crate::parse::{common::*, block_fragmentation::{FlatLexedProject, InnerProje
                 },
                 Block {
                     kind: BlockKind::Table(Named::WithName { name: "tt", index: 1 }),
-                    lines: vec!["/bb/", "\\№-", "/cc/"]
+                    lines: vec!["/ bb /", "\\№-", "/ cc /"]
                 },
                 Block {
                     kind: BlockKind::Paragraph,
@@ -2953,18 +2979,18 @@ use crate::parse::{common::*, block_fragmentation::{FlatLexedProject, InnerProje
 
     #[test]
     fn block_check_table_two_in_row() {
-        let source = "\\№ tt\n/aa/\n\\№-\n/bb/\n\\№\n\\№ uu\n/cc/\n\\№-\n/dd/\n\\№";
+        let source = "\\№ tt\n/ aa /\n\\№-\n/ bb /\n\\№\n\\№ uu\n/ cc /\n\\№-\n/ dd /\n\\№";
         let out = split_blocks(source);
         let expected = FlatLexedProject {
             links: InnerProjectLinks { tables: refs(&[("tt", 1), ("uu", 2)]), ..Default::default() },
             blocks: vec![
                 Block {
                     kind: BlockKind::Table(Named::WithName { name: "tt", index: 1 }),
-                    lines: vec!["/aa/", "\\№-", "/bb/"]
+                    lines: vec!["/ aa /", "\\№-", "/ bb /"]
                 },
                 Block {
                     kind: BlockKind::Table(Named::WithName { name: "uu", index: 2 }),
-                    lines: vec!["/cc/", "\\№-", "/dd/"]
+                    lines: vec!["/ cc /", "\\№-", "/ dd /"]
                 }
             ],
             ..Default::default()
@@ -2974,12 +3000,12 @@ use crate::parse::{common::*, block_fragmentation::{FlatLexedProject, InnerProje
 
     #[test]
     fn block_check_table_p_lines_outside() {
-        let source = "/aa/bb/\n\\№- Л";
+        let source = "/ aa / bb /\n\\№- Л";
         let out = split_blocks(source);
         let expected = project(vec![
             Block {
                 kind: BlockKind::Paragraph,
-                lines: vec!["/aa/bb/", "\\№- Л"]
+                lines: vec!["/ aa / bb /", "\\№- Л"]
             }
         ]);
         assert_eq!(out, expected);
@@ -2996,5 +3022,99 @@ use crate::parse::{common::*, block_fragmentation::{FlatLexedProject, InnerProje
             }
         ]);
         assert_eq!(out, expected);
+    }
+
+    fn kinds<'a>(out: &'a FlatLexedProject) -> Vec<&'a BlockKind<'a>> {
+        out.blocks.iter().map(|b| &b.kind).collect()
+    }
+
+    #[test]
+    fn block_check_shield_cancels_block_tag() {
+        for source in ["_\\+ текст", "_\\№ 5", "_\\(см. рис., выше)", "_\\. пункт"] {
+            let out = split_blocks(source);
+            assert_eq!(out, project(vec![Block { kind: BlockKind::Paragraph, lines: vec![source] }]), "{source:?}");
+        }
+    }
+
+    #[test]
+    fn block_check_list_no_space_after_marker_is_text() {
+        let out = split_blocks("\\.текст");
+        assert_eq!(out, project(vec![Block { kind: BlockKind::Paragraph, lines: vec!["\\.текст"] }]));
+    }
+
+    #[test]
+    fn block_check_list_tab_indent() {
+        let out = split_blocks("\\. a\n\\\t. b\n\\ \t1 c");
+        assert_eq!(out, project(vec![Block { kind: BlockKind::List, lines: vec!["\\. a", "\\\t. b", "\\ \t1 c"] }]));
+    }
+
+    #[test]
+    fn block_check_image_brackets_line_is_image() {
+        let out = split_blocks("\\(см. рис., выше)");
+        assert_eq!(out.blocks, vec![Block {
+            kind: BlockKind::Image(ImageKind { named: Named::WithName { name: "выше", index: 1 }, scale: 100 }),
+            lines: vec!["см. рис."]
+        }]);
+    }
+
+    #[test]
+    fn block_check_image_empty() {
+        let out = split_blocks("\\()");
+        assert_eq!(out, project(vec![Block {
+            kind: BlockKind::Image(ImageKind { named: Named::Anonymous, scale: 100 }),
+            lines: vec![""]
+        }]));
+    }
+
+    #[test]
+    fn block_check_image_escaped_comma() {
+        let out = split_blocks("\\(a_, b.png, Схема_, вариант, 120)");
+        assert_eq!(out.blocks, vec![Block {
+            kind: BlockKind::Image(ImageKind { named: Named::WithName { name: "Схема_, вариант", index: 1 }, scale: 120 }),
+            lines: vec!["a_, b.png"]
+        }]);
+        assert_eq!(out.links.resolve(RefKind::Image, "схема, вариант"), Some(1));
+        assert_eq!(super::unescape_image_path("a_, b__c.png"), "a, b__c.png");
+    }
+
+    #[test]
+    fn block_check_image_escaped_comma_does_not_count() {
+        let out = split_blocks("\\(a, b, 100, d)");
+        assert_eq!(kinds(&out), vec![&BlockKind::Paragraph]);
+        let out = split_blocks("\\(a, b_, c, 100)");
+        assert_eq!(out.blocks[0].kind, BlockKind::Image(ImageKind { named: Named::WithName { name: "b_, c", index: 1 }, scale: 100 }));
+    }
+
+    #[test]
+    fn block_check_note_without_text_is_text() {
+        let out = split_blocks("\\**1");
+        assert_eq!(out, project(vec![Block { kind: BlockKind::Paragraph, lines: vec!["\\**1"] }]));
+    }
+
+    #[test]
+    fn block_check_note_leading_zero() {
+        let out = split_blocks("\\**01 текст");
+        assert!(out.links.has_note(1));
+    }
+
+    #[test]
+    fn block_check_lone_cr_is_not_blank() {
+        let out = split_blocks("\\+\ra");
+        assert_eq!(kinds(&out), vec![&BlockKind::Paragraph]);
+    }
+
+    #[test]
+    fn block_check_code_trailing_blanks_trimmed() {
+        let out = split_blocks("\\// 0\n    fn a() {  \t\n\n}\t\n\\//");
+        assert_eq!(out.blocks, vec![Block {
+            kind: BlockKind::Code(Named::Anonymous),
+            lines: vec!["    fn a() {", "", "}"]
+        }]);
+    }
+
+    #[test]
+    fn block_check_name_key_collapse_and_case() {
+        let out = split_blocks("\\№ Scheme  \\:узла:\t2\n/ a /\n\\№-\n\\№");
+        assert_eq!(out.links.resolve(RefKind::Table, "scheme узла 2"), Some(1));
     }
 }
