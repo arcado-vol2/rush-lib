@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <link rel="stylesheet", href="gostlike_7_32.css">
+</head>
+<body>
+    <main>
+    <h1 id="h-1"><span class="index"><span class="l1">1</span></span><span class="body">Заголовок 1 уровня</span></h1>
+    <p> Текст после</p>
+    <h2 id="h-1-1"><span class="index"><span class="l1">1</span><span class="l2">1</span></span><span class="body">Заголовок 2 уровня</span></h2>
+    <p> Текст после</p>
+    <h3 id="h-1-1-1"><span class="index"><span class="l1">1</span><span class="l2">1</span><span class="l3">1</span></span><span class="body">Заголовок 3 уровня</span></h3>
+    <p> Текст после</p>
+    <h4 id="h-1-1-1-1"><span class="index"><span class="l1">1</span><span class="l2">1</span><span class="l3">1</span><span class="l4">1</span></span><span class="body">Заголовок 4 уровня</span></h4>
+    <p> Текст после</p>
+    <h5 id="h-1-1-1-1-1"><span class="index"><span class="l1">1</span><span class="l2">1</span><span class="l3">1</span><span class="l4">1</span><span class="l5">1</span></span><span class="body">Заголовок 5 уровня</span></h5>
+    <p>Главный корпус пансионата, наполовину скрытый старыми тополями и кипарисами, был мрачным серым зданием, как бы повернувшимся к морю задом по команде безумного Иванушки. Его фасад с колоннами, потрескавшимися звездами и навек согнутыми порывом гипсового ветра снопами был обращен к узкому двору, где смешивались запахи кухни, прачечной и парикмахерской, а на набережную выходила монолитная стена с двумя или тремя окнами. В нескольких метрах напротив колоннады поднимался бетонный забор, по которому уходили вдаль поблескивающие в лучах заката трубы теплоцентрали. Высокие торжественные двери, скрытые в тени опирающегося на колонны циклопического балкона (скорее даже террасы) были заперты так давно, что даже щель между ними исчезла под несколькими слоями спекшейся краски, и двор обычно пустовал - только иногда в него осторожно протискивался грузовик, привозивший из Феодосии молоко и хлеб.</p>
+    <p>Но в этот день во дворе не было даже грузовика, поэтому опершийся локтями на лепное ограждение балкона гражданин не был виден никому, кроме, может быть, пары патрульных чаек, белыми точками висевших в небе. Гражданин глядел вниз и вправо, на маленький домик лодочной станции, под крышей которого помещалась воронка репродуктора. Шумело море, но когда ветер начинал дуть в сторону пансионата, можно было разобрать обрывки обращенных</p>
+    <p class="comment">Некий комментарий автора относительно того ужаса который тут происходит, на несколько строк без</p>
+    <p>Ещё текст дальше</p>
+    <div class="formula" id="f-1">
+        <div class="index">(1)</div>
+        <div class="name">Среднее арифметическое:</div>
+        <div class="body">
+            <math display="block">
+                <mrow>
+                <mover><mi>x</mi><mo>¯</mo></mover><mo>=</mo>
+                <mfrac><mn>1</mn><mi>n</mi></mfrac>
+                <munderover><mo>∑</mo><mrow><mi>i</mi><mo>=</mo><mn>1</mn></mrow><mi>n</mi></munderover>
+                <msub><mi>x</mi><mi>i</mi></msub><mo>,</mo>
+                </mrow>
+            </math>
+        </div>
+    </div>
+    <p>где s - какое-то значение</p>
+    <p>Какой-то текст после формулы, обычный красивый длинный и понятный, я просто пишу буквы ради того чтобы заполнить пространнство хоть чем-то</p>
+    <div class="code" id="c-1">
+        <div class="index">Листинг&nbsp;1 —</div>
+        <div class="name">Пример кода</div>
+        <div class="body">
+            <code>
+def foo() -> int:
+    print("something cool")
+            </code>
+        </div>
+    </div>
+    <p>Текст после кода, опять на несколько строк, опять крутой и офигенный, с кучей значений и так далее и тому подобное</p>
+    <div class="image" id="i-1">
+        <div class="index">Рисунок&nbsp;1 —</div>
+        <div class="name">Кот</div>
+        <div class="body">
+            <img src="image.webp">
+        </div>
+    </div>
+    <p>Некий текст после картинки, напиример про нян кэта, нян нян нянян я нянянянянян нян ян ня яння ня ня нян яня н н яня нян ня ня ня ня н<a class="ref-note" href="#n-1">1</a>, и ещё немного текста<a class="ref-note" href="#n-2">2</a></p>
+    <div class="note">
+        <div class="item" id="n-1">
+            <div class="index">1)</div>
+            <div class="body">Сноска моя сносочка о чём сносочном</div>
+        </div>
+        <div class="item" id="n-2">
+            <div class="index">2)</div>
+            <div class="body">Сноска моя сносочка о чём сносочном</div>
+        </div>
+    </div>
+    <p>Текст дальше</p>
+    <div class="list">
+        <div class="item num" style="--level: 1">1)&nbsp;Первый нумерованный пункт, начинается не с нулевого уровня</div>
+        <div class="item num" style="--level: 1">2)&nbsp;Второй нумерованный пункт, достаточно длинный, чтобы перенестись на следующую строку и показать, что продолжение текста начинается от левого края</div>
+        <div class="item dash" style="--level: 3">–&nbsp;Ненумерованный пункт на третьем уровне</div>
+        <div class="item num" style="--level: 3">1)&nbsp;Нумерация после тире снова с единицы</div>
+        <div class="item num" style="--level: 3">2)&nbsp;Второй пункт после тире</div>
+        <div class="item num" style="--level: 2">1)&nbsp;Смена уровня, нумерация снова с единицы</div>
+        <div class="item dash" style="--level: 0">–&nbsp;Ненумерованный пункт на нулевом уровне</div>
+    </div>
+    <div class="table" id="t-1">
+        <div class="index">Таблица&nbsp;1 —</div>
+        <div class="name">Пример таблицы с L-образной ячейкой</div>
+        <table>
+            <thead class="header">
+                <tr><th class="left">Параметр</th><th class="center">Значение</th><th class="right">Единицы</th></tr>
+            </thead>
+            <tbody class="body">
+                <tr><td class="left">Длина</td><td class="center">12</td><td class="right">м</td></tr>
+                <tr><td class="left">Ширина</td><td class="center" colspan="2">L-образная ячейка</td></tr>
+                <tr><td class="left">Высота</td><td class="center join-top"></td><td class="right">м</td></tr>
+                <tr><td class="left" rowspan="2">Масса</td><td class="center">5</td><td class="right">кг</td></tr>
+                <tr><td class="center">7</td><td class="right">кг</td></tr>
+                <tr><td class="left">Объём</td><td class="center" colspan="2">не задан</td></tr>
+            </tbody>
+        </table>
+    </div>
+
+    <p> Текст с примерами форматирования <b>жирный</b>, далее будет <i>курсивный</i>, потом <u>подчёркнутый</u> а затем  <s>зачёркнутый</s>, <span class="color c-ff8800">цветной</span>, <a href="https://example.com">внешняя ссылка</a>, см. <a class="ref-table" href="#t-1">таблицу 1</a>, <a class="ref-image" href="#i-1">рисунок 1</a>, <a class="ref-code" href="#c-1">листинг 1</a>, <a class="ref-formula" href="#f-1">формулу (1)</a> </p>
+</main>
+</body>
+</html>

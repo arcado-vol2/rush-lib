@@ -22,7 +22,7 @@ fn get_path<'a>(file: &'a str, exts: &[&str]) -> &'a str{
 }
 
 impl GlobalProject {
-    pub fn build_index(root: &Path) -> io::Result<GlobalProject> {
+    pub(crate) fn build_index(root: &Path) -> io::Result<GlobalProject> {
         let mut project = GlobalProject::default();
         walk(root, root, &mut project)?;
         Ok(project)
@@ -30,12 +30,12 @@ impl GlobalProject {
 
 
 
-    pub fn get_file(&self, file: &str) -> Option<PathBuf> {
+    pub(crate) fn get_file(&self, file: &str) -> Option<PathBuf> {
         let name = get_path(file, FILE_EXTENSIONS);
         self.files.get(name).cloned()
     }
 
-    pub fn get_image(&self, file: &str) -> Option<PathBuf> {
+    pub(crate) fn get_image(&self, file: &str) -> Option<PathBuf> {
         let name = get_path(file, IMG_EXTENSIONS);
         self.images.get(name).cloned()
     }

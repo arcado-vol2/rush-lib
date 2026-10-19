@@ -1,32 +1,32 @@
 use std::{path::PathBuf, vec};
 use std::fmt;
 
-use crate::parse::{block_fragmentation::{Block, BlockKind, InnerProjectLinks, split_blocks, unescape_image_path}, common::*, lexemas::{BULLET_LIST, MARK, NUMERIC_LIST, TAB, TAB_WIDTH, TABLE_CENTER, TABLE_FUL_SEP, TABLE_LEFT, TABLE_MERGE_LEFT_TAG, TABLE_MERGE_UP_LEFT_TAG, TABLE_MERGE_UP_TAG, TABLE_RIGHT, TABLE_SEP, is_blank}, line_parse::{InlineContext, InlinePreEl, PreSpan, PreStyle, PreparsedLines, generate_pre_spans}, link_project::GlobalProject};
+use crate::parse::{block_fragmentation::{Block, BlockKind, InnerProjectLinks, split_blocks, unescape_image_path}, common::*, lexemas::{BULLET_LIST, MARK, NUMERIC_LIST, TAB, TAB_WIDTH, TABLE_CENTER, TABLE_FUL_SEP, TABLE_LEFT, TABLE_MERGE_LEFT_TAG, TABLE_MERGE_UP_LEFT_TAG, TABLE_MERGE_UP_TAG, TABLE_RIGHT, TABLE_SEP, is_blank}, line_parse::{InlineContext, InlinePreEl, PreSpan, PreStyle, PreparsedLines, generate_pre_spans, parse_note_line}, link_project::GlobalProject};
 #[derive(Debug)]
-enum OuterLink<'a> {
+pub(crate) enum OuterLink<'a> {
     URL(&'a str),
     File(PathBuf)
 }
 #[derive(Debug)]
-struct InnerLink {
-    index: u16,
-    kind: RefKind
+pub(crate) struct InnerLink {
+    pub(crate) index: u16,
+    pub(crate) kind: RefKind
 }
 #[derive(Debug)]
-enum InlineEl<'a> {
+pub(crate) enum InlineEl<'a> {
     String(&'a str),
     InnerLink(Option<InnerLink>),
     Note(Option<u16>),
     Space
 }
-struct Style<'a> {
-    is_bold: bool,
-    is_italic: bool,
-    is_mono: bool,
-    is_strike: bool,
-    is_under: bool,
-    color: Option<Color>,
-    link: Option<OuterLink<'a>>,
+pub(crate) struct Style<'a> {
+    pub(crate) is_bold: bool,
+    pub(crate) is_italic: bool,
+    pub(crate) is_mono: bool,
+    pub(crate) is_strike: bool,
+    pub(crate) is_under: bool,
+    pub(crate) color: Option<Color>,
+    pub(crate) link: Option<OuterLink<'a>>,
 }
 impl<'a> fmt::Debug for Style<'a> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -52,15 +52,14 @@ impl<'a> fmt::Debug for Style<'a> {
 
 
 #[derive(Debug)]
-struct Span<'a> {
-    text: Vec<InlineEl<'a>>,
-    style: Style<'a>
+pub(crate) struct Span<'a> {
+    pub(crate) text: Vec<InlineEl<'a>>,
+    pub(crate) style: Style<'a>
 }
 
 impl<'a> Span<'a> {
     fn from_pre_span(pre: PreSpan<'a>, refs_allowed: bool, outer_links: &GlobalProject, inner_links: &InnerProjectLinks) -> Self {
         let PreStyle {is_bold, is_italic, is_mono, is_strike, is_under, color, link} = pre.style;
-        println!("Color {color:?}");
         let link: Option<OuterLink> = match link {
             Some(pre_link) => {
                 match outer_links.get_file(pre_link) {
@@ -100,53 +99,58 @@ fn parse_generic_block<'a> (lines: Vec<&'a str>, ctx: InlineContext, outer_links
 
 
 #[derive(Debug)]
-struct Paragraph<'a> {
-    content: Vec<Span<'a>>
+pub(crate) struct Paragraph<'a> {
+    pub(crate) content: Vec<Span<'a>>
 }
 
 
 #[derive(Debug)]
-struct Header<'a> {
-    level: u8,
-    content: Vec<Span<'a>>
+pub(crate) struct Header<'a> {
+    pub(crate) level: u8,
+    pub(crate) index: [u16; 5],
+    pub(crate) content: Vec<Span<'a>>
 }
 
 #[derive(Debug)]
-struct Comment<'a> {
+pub(crate) struct Comment<'a> {
     content: Vec<Span<'a>>
 }
 #[derive(Debug)]
-struct Formula<'a> {
+pub(crate) struct Formula<'a> {
     named: Named<Vec<Span<'a>>>,
     content: Vec<&'a str>
 }
 #[derive(Debug)]
-struct Code<'a> {
+pub(crate) struct Code<'a> {
     named: Named<Vec<Span<'a>>>,
     content: Vec<&'a str>
 }
 #[derive(Debug)]
-struct Image<'a> {
+pub(crate) struct Image<'a> {
     meta: ImageKind<Vec<Span<'a>>>,
     path: Option<PathBuf>
 }
 #[derive(Debug)]
-struct Note<'a> {
-    index: u16,
-    content: Vec<Span<'a>>
+pub(crate) struct NoteItem<'a> {
+    pub(crate) index: u16,
+    pub(crate) content: Vec<Span<'a>>
 }
 #[derive(Debug)]
-enum ListElKind<'a> {
+pub(crate) struct Note<'a> {
+    pub(crate) content: Vec<NoteItem<'a>>
+}
+#[derive(Debug)]
+pub(crate) enum ListElKind<'a> {
     Ordered(Vec<Span<'a>>),
     Unordered(Vec<Span<'a>>)
 }
 #[derive(Debug)]
-struct ListEl<'a> {
+pub(crate) struct ListEl<'a> {
     this: Option<ListElKind<'a>>,
     children: Vec<ListEl<'a>>
 }
  #[derive(Debug)]
-struct List<'a> {
+pub(crate) struct List<'a> {
     content: Vec<ListEl<'a>>
 }
 impl<'a> List<'a> {
@@ -242,7 +246,7 @@ fn split_table_cells(line: &str) -> Vec<&str> {
 }
 
 #[derive(Debug)]
-struct Table<'a> {
+pub(crate) struct Table<'a> {
     named: Named<Vec<Span<'a>>>,
     headers: Vec<Vec<TableEl<'a>>>,
     aligments: Vec<Aligment>,
@@ -326,7 +330,7 @@ impl<'a> Table<'a> {
 
 
 
-enum Node<'a> {
+pub(crate) enum Node<'a> {
     Paragraph(Paragraph<'a>),
     Header(Header<'a>),
     Comment(Comment<'a>),
@@ -348,13 +352,16 @@ impl<'a> Node<'a> {
                 let spans = parse_generic_block(block.lines, InlineContext::Text, outer_links, inner_links);
                 Self::Comment(Comment {content: spans})
             },
-            BlockKind::Header(l) => {
+            BlockKind::Header{level, counter} => {
                 let spans = parse_generic_block(block.lines, InlineContext::Text, outer_links, inner_links);
-                Self::Header( Header{content: spans, level: l})
+                Self::Header( Header{content: spans, level, index: counter.0})
             },
-            BlockKind::Note(i) => {
-                let spans = parse_generic_block(block.lines, InlineContext::Text, outer_links, inner_links);
-                Self::Note(Note {index: i, content: spans})
+            BlockKind::Note => {
+                let content = block.lines.into_iter().map(|l| {
+                    let (index, text) = parse_note_line(l).expect("not note line in note block");
+                    NoteItem { index, content: parse_generic_block(vec![text], InlineContext::Text, outer_links, inner_links) }
+                }).collect();
+                Self::Note(Note { content })
             },
             BlockKind::Code(name) => {
                 Self::Code(Code {
@@ -434,7 +441,6 @@ impl<'a> fmt::Debug for Node<'a> {
                 .finish(),
 
             Node::Note(v) => f.debug_struct("Note")
-                .field("index", &v.index)
                 .field("content", &Lines(&v.content))
                 .finish(),
 
@@ -449,34 +455,9 @@ impl<'a> fmt::Debug for Node<'a> {
     }
 }
 
-trait Backend {
-    fn paragraph(&mut self, paragraph: &Paragraph);
-    fn header(&mut self, header: &Header);
-    fn comment(&mut self, comment: &Comment);
-    fn formula(&mut self, formula: &Formula);
-    fn code(&mut self, code: &Code);
-    fn image(&mut self, image: &Image);
-    fn note(&mut self, note: &Note);
-    fn list(&mut self, list: &List);
-    fn table(&mut self, table: &Table);
-
-    fn block(&mut self, node: &Node) {
-        match node {
-            Node::Paragraph(b) => self.paragraph(b),
-            Node::Header(b) => self.header(b),
-            Node::Comment(b) => self.comment(b),
-            Node::Formula(b) => self.formula(b),
-            Node::Code(b) => self.code(b),
-            Node::Image(b) => self.image(b),
-            Node::Note(b) => self.note(b),
-            Node::List(b) => self.list(b),
-            Node::Table(b) => self.table(b),
-        }
-    }
-}
 
 pub(crate) struct Rush<'a> {
-    nodes: Vec<Node<'a>>
+    pub(crate) nodes: Vec<Node<'a>>
 }
 
 impl<'a> fmt::Debug for Rush<'a>
@@ -495,9 +476,6 @@ where
 impl<'a> Rush<'a> {
     pub(crate) fn new(source: &'a str,  global_project: &GlobalProject) -> Self {
         let lexed_project = split_blocks(source);
-        println!("lexed: {lexed_project:?}");
-        println!();
-        println!();
         let mut out = Self {nodes: Vec::new()};
 
         for block in lexed_project.blocks {
@@ -512,7 +490,7 @@ impl<'a> Rush<'a> {
 
 #[cfg(test)] mod test {
     use std::collections::HashMap;
-    use crate::parse::{rush_builder::*, link_project::GlobalProject};
+    use crate::parse::{rush::*, link_project::GlobalProject};
 
     fn empty_gp() -> GlobalProject {
         GlobalProject {
@@ -564,11 +542,6 @@ impl<'a> Rush<'a> {
         row.iter().map(|s| s.to_string()).collect()
     }
 
-    #[test]
-    fn main() {
-        let out = Rush::new("\\№ 0\n / Заг 1 / Заг 2 / \n \\№-\n / Яч 11 / Яч 12 /\n / Яч 21 / Яч 22 /\n\\№", &empty_gp());
-        println!("{out:?}");
-    }
 
     #[test]
     fn split_cells() {
@@ -662,6 +635,19 @@ impl<'a> Rush<'a> {
         match &out.nodes[0] {
             Node::Paragraph(p) => assert!(p.content.iter().flat_map(|s| s.text.iter())
                 .any(|el| matches!(el, InlineEl::InnerLink(Some(InnerLink { index: 1, .. }))))),
+            other => panic!("{other:?}")
+        }
+    }
+
+    #[test]
+    fn notes_grouped_into_one_node() {
+        let gp = empty_gp();
+        let out = Rush::new("\\**1 первая\n\\**2 вторая", &gp);
+        match &out.nodes[..] {
+            [Node::Note(n)] => {
+                let items: Vec<_> = n.content.iter().map(|i| (i.index, spans_text(&i.content))).collect();
+                assert_eq!(items, vec![(1, "первая".to_string()), (2, "вторая".to_string())]);
+            },
             other => panic!("{other:?}")
         }
     }

@@ -1,6 +1,21 @@
 use std::{collections::{HashMap, HashSet}, vec};
 use std::borrow::Cow;
-use crate::parse::{lexemas::*, line_parse::{InlineContext, clear_name_attribute_in}, common::*};
+use crate::parse::{lexemas::*, line_parse::{InlineContext, clear_name_attribute_in, parse_note_line}, common::*};
+
+
+#[derive(PartialEq, Default, Debug, Clone, Copy)]
+
+pub(crate) struct HeaderCounter(pub(crate)  [u16; 5]);
+
+impl HeaderCounter {
+    fn add(&mut self, level: u8) {
+        debug_assert!((1..=5).contains(&level), "Somehow level is {level} and not 1-5");
+        let i = (level - 1) as usize;
+        self.0[..i].iter_mut().for_each(|c| *c = (*c).max(1)); 
+        self.0[i] = self.0[i].saturating_add(1);
+        self.0[i + 1..].fill(0);        
+    }
+}
 
 
 
@@ -9,12 +24,12 @@ pub(crate) enum BlockKind<'a> {
     Paragraph,
     List,
     Table(Named<&'a str>),
-    Header(u8),
+    Header{level: u8, counter: HeaderCounter},
     Comment,
     Formula(Named<&'a str>),
     Code(Named<&'a str>),
     Image(ImageKind<&'a str>),
-    Note(u16)
+    Note
 }
 
 #[derive(Debug, PartialEq)]
@@ -138,6 +153,8 @@ fn flush<'a>(out: &mut Vec<Block<'a>>, line: Option<&'a str>, kind: BlockKind<'a
     
 }
 
+
+
 #[derive(PartialEq, Debug)]
 enum LineKind {
     Empty,
@@ -164,7 +181,6 @@ enum OpenBlockKind {
     Comment,
     Table
 }
-
 
 fn is_table_row(line: &str) -> bool {
     let Some(inner) = line.strip_prefix(TABLE_SEP).and_then(|s| s.strip_suffix(TABLE_SEP)) else {
@@ -260,10 +276,9 @@ impl<'a> ClassifiedLine<'a> {
                     if first_w.chars().all(|c| c == HEADER){
                         let header_level = first_w.chars().count().min(5) as u8;
                         return Self { raw, formated, thinned: rest, kind: LineKind::Header(header_level)};
-                    } else if let Some(num) = NOTE_TAG.strip(first_w) {
-                        let num = num.parse::<u16>();
-                        if let Ok(link) = num{
-                            return Self {raw, formated, thinned: rest, kind: LineKind::Note(link)};
+                    } else if NOTE_TAG.strip(first_w).is_some() {
+                        if let Some((link, text)) = parse_note_line(formated) {
+                            return Self {raw, formated, thinned: text, kind: LineKind::Note(link)};
                         } else {
                             return Self {raw, formated, thinned: formated, kind: LineKind::Regular};
                         }
@@ -328,7 +343,7 @@ pub(crate) fn split_blocks<'a>(source: &'a str) -> FlatLexedProject<'a> {
     let mut project = FlatLexedProject::default();
     let mut par_is_open = false; 
     let lines: Vec<ClassifiedLine> = source.split_inclusive('\n').map(|l| ClassifiedLine::new(l)).collect();
-
+    let mut header_counter = HeaderCounter::default();
     let mut current: usize = 0;
     let mut inner_block = OpenBlockKind::None;
     fn flush_par<'a>(out: &mut Vec<Block<'a>>, line: &'a str, par_is_open: &mut bool) {
@@ -352,7 +367,8 @@ pub(crate) fn split_blocks<'a>(source: &'a str) -> FlatLexedProject<'a> {
                        flush_par(&mut project.blocks, line.formated, &mut par_is_open);
                     },
                     LineKind::Header(l) => {
-                        flush(&mut project.blocks, Some(line.thinned), BlockKind::Header(l), &mut par_is_open);
+                        header_counter.add(l);
+                        flush(&mut project.blocks, Some(line.thinned), BlockKind::Header{level: l, counter: header_counter}, &mut par_is_open);
                     },
                     LineKind::CodeOpen => {
                         if search_for_pair(&lines, &current, Some(LineKind::CodeOpen), LineKind::CodeClose) {
@@ -452,12 +468,23 @@ pub(crate) fn split_blocks<'a>(source: &'a str) -> FlatLexedProject<'a> {
                             t_pos += 1;
                         }
                     },
-                    LineKind::Note(n) => {
-                        if n == 0 {
-                            flush(&mut project.blocks, Some(line.thinned), BlockKind::Note(n), &mut par_is_open);
+                    LineKind::Note(_) => {
+                        par_is_open = false;
+                        let mut note_lines = Vec::new();
+                        for t_pos in current..lines.len() {
+                            let t_line = &lines[t_pos];
+                            match t_line.kind {
+                                LineKind::Note(n) => {
+                                    current = t_pos;
+                                    if n == 0 || project.links.notes.insert(n) {
+                                        note_lines.push(t_line.formated);
+                                    }
+                                },
+                                _ => break
+                            }
                         }
-                        else if project.links.notes.insert(n) {
-                            flush(&mut project.blocks, Some(line.thinned), BlockKind::Note(n), &mut par_is_open);
+                        if !note_lines.is_empty() {
+                            project.blocks.push(Block { kind: BlockKind::Note, lines: note_lines });
                         }
                     }
                     _ => {}
@@ -505,10 +532,14 @@ pub(crate) fn split_blocks<'a>(source: &'a str) -> FlatLexedProject<'a> {
 #[cfg(test)] mod test {
     use std::{borrow::Cow, collections::HashSet, vec};
 
-use crate::parse::{common::*, block_fragmentation::{FlatLexedProject, InnerProjectLinks, Block, BlockKind::{self, Header}, ImageKind, Named, NamedLinkable, split_blocks}};
+use crate::parse::{common::*, block_fragmentation::{FlatLexedProject, InnerProjectLinks, Block, BlockKind::{self, Header}, HeaderCounter, ImageKind, Named, NamedLinkable, split_blocks}};
 
     fn project<'a>(blocks: Vec<Block<'a>>) -> FlatLexedProject<'a> {
         FlatLexedProject { blocks, ..Default::default() }
+    }
+
+    fn header<'a>(level: u8, counts: [u16; 5]) -> BlockKind<'a> {
+        Header { level, counter: HeaderCounter(counts) }
     }
 
     fn refs<'a>(items: &[(&'a str, u16)]) -> NamedLinkable<'a> {
@@ -684,23 +715,23 @@ use crate::parse::{common::*, block_fragmentation::{FlatLexedProject, InnerProje
         let out = split_blocks(source);
         let expected = project(vec![
             Block {
-                kind: Header(1),
+                kind: header(1, [1, 0, 0, 0, 0]),
                 lines: vec!["1"]
             },
             Block {
-                kind: Header(2),
+                kind: header(2, [1, 1, 0, 0, 0]),
                 lines: vec!["2"]
             },
             Block {
-                kind: Header(3),
+                kind: header(3, [1, 1, 1, 0, 0]),
                 lines: vec!["3"]
             },
             Block {
-                kind: Header(4),
+                kind: header(4, [1, 1, 1, 1, 0]),
                 lines: vec!["4"]
             },
             Block {
-                kind: Header(5),
+                kind: header(5, [1, 1, 1, 1, 1]),
                 lines: vec!["5"]
             }
 
@@ -714,7 +745,7 @@ use crate::parse::{common::*, block_fragmentation::{FlatLexedProject, InnerProje
         let out = split_blocks(source);
         let expected = project(vec![
             Block {
-                kind: Header(5),
+                kind: header(5, [1, 1, 1, 1, 1]),
                 lines: vec!["h"]
             }
         ]);
@@ -727,7 +758,7 @@ use crate::parse::{common::*, block_fragmentation::{FlatLexedProject, InnerProje
         let out = split_blocks(source);
         let expected = project(vec![
             Block {
-                kind: Header(2),
+                kind: header(2, [1, 1, 0, 0, 0]),
                 lines: vec!["aa"]
             }
         ]);
@@ -740,7 +771,7 @@ use crate::parse::{common::*, block_fragmentation::{FlatLexedProject, InnerProje
         let out = split_blocks(source);
         let expected = project(vec![
             Block {
-                kind: Header(2),
+                kind: header(2, [1, 1, 0, 0, 0]),
                 lines: vec!["C++"]
             }
         ]);
@@ -766,7 +797,7 @@ use crate::parse::{common::*, block_fragmentation::{FlatLexedProject, InnerProje
         let out = split_blocks(source);
         let expected = project(vec![
             Block {
-                kind: Header(2),
+                kind: header(2, [1, 1, 0, 0, 0]),
                 lines: vec!["aa"]
             }
         ]);
@@ -805,7 +836,7 @@ use crate::parse::{common::*, block_fragmentation::{FlatLexedProject, InnerProje
         let out = split_blocks(source);
         let expected = project(vec![
             Block {
-                kind: BlockKind::Header(1),
+                kind: header(1, [1, 0, 0, 0, 0]),
                 lines: vec!["aa"]
             }
         ]);
@@ -822,7 +853,7 @@ use crate::parse::{common::*, block_fragmentation::{FlatLexedProject, InnerProje
                 lines: vec!["aa"]
             },
             Block {
-                kind: BlockKind::Header(1),
+                kind: header(1, [1, 0, 0, 0, 0]),
                 lines: vec!["bb"]
             },
             Block {
@@ -839,11 +870,11 @@ use crate::parse::{common::*, block_fragmentation::{FlatLexedProject, InnerProje
         let out = split_blocks(source);
         let expected = project(vec![
             Block {
-                kind: BlockKind::Header(2),
+                kind: header(2, [1, 1, 0, 0, 0]),
                 lines: vec!["aa"]
             },
             Block {
-                kind: BlockKind::Header(2),
+                kind: header(2, [1, 2, 0, 0, 0]),
                 lines: vec!["bb"]
             }
         ]);
@@ -856,7 +887,7 @@ use crate::parse::{common::*, block_fragmentation::{FlatLexedProject, InnerProje
         let out = split_blocks(source);
         let expected = project(vec![
             Block {
-                kind: BlockKind::Header(1),
+                kind: header(1, [1, 0, 0, 0, 0]),
                 lines: vec!["aa"]
             },
             Block {
@@ -1186,7 +1217,7 @@ use crate::parse::{common::*, block_fragmentation::{FlatLexedProject, InnerProje
                 lines: vec!["aa"]
             },
             Block {
-                kind: BlockKind::Header(1),
+                kind: header(1, [1, 0, 0, 0, 0]),
                 lines: vec!["bb"]
             },
             Block {
@@ -1413,7 +1444,7 @@ use crate::parse::{common::*, block_fragmentation::{FlatLexedProject, InnerProje
         let out = split_blocks(source);
         let expected = project(vec![
             Block {
-                kind: BlockKind::Header(1),
+                kind: header(1, [1, 0, 0, 0, 0]),
                 lines: vec!["bb"]
             },
             Block {
@@ -1580,7 +1611,7 @@ use crate::parse::{common::*, block_fragmentation::{FlatLexedProject, InnerProje
                 lines: vec!["\\1 aa", "\\1 bb"]
             },
             Block {
-                kind: BlockKind::Header(1),
+                kind: header(1, [1, 0, 0, 0, 0]),
                 lines: vec!["cc"]
             }
         ]);
@@ -1633,8 +1664,113 @@ use crate::parse::{common::*, block_fragmentation::{FlatLexedProject, InnerProje
             links: InnerProjectLinks { notes: HashSet::from([1]), ..Default::default() },
             blocks: vec![
                 Block {
-                    kind: BlockKind::Note(1),
-                    lines: vec!["aa"]
+                    kind: BlockKind::Note,
+                    lines: vec!["\\**1 aa"]
+                }
+            ],
+            ..Default::default()
+        };
+        assert_eq!(out, expected);
+    }
+
+    #[test]
+    fn block_check_note_group() {
+        let source = "\\**1 aa\n\\**2 bb\n\\**0 cc";
+        let out = split_blocks(source);
+        let expected = FlatLexedProject {
+            links: InnerProjectLinks { notes: HashSet::from([1, 2]), ..Default::default() },
+            blocks: vec![
+                Block {
+                    kind: BlockKind::Note,
+                    lines: vec!["\\**1 aa", "\\**2 bb", "\\**0 cc"]
+                }
+            ],
+            ..Default::default()
+        };
+        assert_eq!(out, expected);
+    }
+
+    #[test]
+    fn block_check_note_group_split_by_empty_line() {
+        let source = "\\**1 aa\n\n\\**2 bb";
+        let out = split_blocks(source);
+        let expected = FlatLexedProject {
+            links: InnerProjectLinks { notes: HashSet::from([1, 2]), ..Default::default() },
+            blocks: vec![
+                Block {
+                    kind: BlockKind::Note,
+                    lines: vec!["\\**1 aa"]
+                },
+                Block {
+                    kind: BlockKind::Note,
+                    lines: vec!["\\**2 bb"]
+                }
+            ],
+            ..Default::default()
+        };
+        assert_eq!(out, expected);
+    }
+
+    #[test]
+    fn block_check_note_group_split_by_invalid() {
+        let source = "\\**1 aa\n\\**2bb\n\\**3 cc";
+        let out = split_blocks(source);
+        let expected = FlatLexedProject {
+            links: InnerProjectLinks { notes: HashSet::from([1, 3]), ..Default::default() },
+            blocks: vec![
+                Block {
+                    kind: BlockKind::Note,
+                    lines: vec!["\\**1 aa"]
+                },
+                Block {
+                    kind: BlockKind::Paragraph,
+                    lines: vec!["\\**2bb"]
+                },
+                Block {
+                    kind: BlockKind::Note,
+                    lines: vec!["\\**3 cc"]
+                }
+            ],
+            ..Default::default()
+        };
+        assert_eq!(out, expected);
+    }
+
+    #[test]
+    fn block_check_note_group_duplicate_dropped() {
+        let source = "\\**1 aa\n\\**1 bb\n\\**2 cc";
+        let out = split_blocks(source);
+        let expected = FlatLexedProject {
+            links: InnerProjectLinks { notes: HashSet::from([1, 2]), ..Default::default() },
+            blocks: vec![
+                Block {
+                    kind: BlockKind::Note,
+                    lines: vec!["\\**1 aa", "\\**2 cc"]
+                }
+            ],
+            ..Default::default()
+        };
+        assert_eq!(out, expected);
+    }
+
+    #[test]
+    fn block_check_note_group_only_duplicates() {
+        let source = "\\**1 aa\n\nbb\n\\**1 cc\ndd";
+        let out = split_blocks(source);
+        let expected = FlatLexedProject {
+            links: InnerProjectLinks { notes: HashSet::from([1]), ..Default::default() },
+            blocks: vec![
+                Block {
+                    kind: BlockKind::Note,
+                    lines: vec!["\\**1 aa"]
+                },
+                Block {
+                    kind: BlockKind::Paragraph,
+                    lines: vec!["bb"]
+                },
+                Block {
+                    kind: BlockKind::Paragraph,
+                    lines: vec!["dd"]
                 }
             ],
             ..Default::default()
@@ -1868,7 +2004,7 @@ use crate::parse::{common::*, block_fragmentation::{FlatLexedProject, InnerProje
         let out = split_blocks(source);
         let expected = project(vec![
             Block {
-                kind: BlockKind::Header(1),
+                kind: header(1, [1, 0, 0, 0, 0]),
                 lines: vec!["aa"]
             },
             Block {
@@ -1876,7 +2012,7 @@ use crate::parse::{common::*, block_fragmentation::{FlatLexedProject, InnerProje
                 lines: vec!["bb"]
             },
             Block {
-                kind: BlockKind::Header(1),
+                kind: header(1, [2, 0, 0, 0, 0]),
                 lines: vec!["cc"]
             }
         ]);
@@ -1925,7 +2061,7 @@ use crate::parse::{common::*, block_fragmentation::{FlatLexedProject, InnerProje
         let out = split_blocks(source);
         let expected = project(vec![
             Block {
-                kind: BlockKind::Header(1),
+                kind: header(1, [1, 0, 0, 0, 0]),
                 lines: vec!["aa"]
             },
             Block {
@@ -1946,7 +2082,7 @@ use crate::parse::{common::*, block_fragmentation::{FlatLexedProject, InnerProje
                 lines: vec!["\\. aa"]
             },
             Block {
-                kind: BlockKind::Header(1),
+                kind: header(1, [1, 0, 0, 0, 0]),
                 lines: vec!["bb"]
             },
             Block {
@@ -2344,8 +2480,8 @@ use crate::parse::{common::*, block_fragmentation::{FlatLexedProject, InnerProje
         let out = split_blocks(source);
         let expected = project(vec![
             Block {
-                kind: BlockKind::Note(0),
-                lines: vec!["aa"]
+                kind: BlockKind::Note,
+                lines: vec!["\\**0 aa"]
             }
         ]);
         assert_eq!(out, expected);
@@ -2359,8 +2495,8 @@ use crate::parse::{common::*, block_fragmentation::{FlatLexedProject, InnerProje
             links: InnerProjectLinks { notes: HashSet::from([1]), ..Default::default() },
             blocks: vec![
                 Block {
-                    kind: BlockKind::Note(1),
-                    lines: vec!["aa bb"]
+                    kind: BlockKind::Note,
+                    lines: vec!["\\**1\t  aa bb"]
                 }
             ],
             ..Default::default()
@@ -2380,8 +2516,8 @@ use crate::parse::{common::*, block_fragmentation::{FlatLexedProject, InnerProje
                     lines: vec!["aa"]
                 },
                 Block {
-                    kind: BlockKind::Note(1),
-                    lines: vec!["bb"]
+                    kind: BlockKind::Note,
+                    lines: vec!["\\**1 bb"]
                 },
                 Block {
                     kind: BlockKind::Paragraph,
@@ -2399,12 +2535,8 @@ use crate::parse::{common::*, block_fragmentation::{FlatLexedProject, InnerProje
         let out = split_blocks(source);
         let expected = project(vec![
             Block {
-                kind: BlockKind::Note(0),
-                lines: vec!["aa"]
-            },
-            Block {
-                kind: BlockKind::Note(0),
-                lines: vec!["bb"]
+                kind: BlockKind::Note,
+                lines: vec!["\\**0 aa", "\\**0 bb"]
             }
         ]);
         assert_eq!(out, expected);
@@ -2880,7 +3012,7 @@ use crate::parse::{common::*, block_fragmentation::{FlatLexedProject, InnerProje
                 lines: vec!["\\№ tt", "/ aa /"]
             },
             Block {
-                kind: BlockKind::Header(1),
+                kind: header(1, [1, 0, 0, 0, 0]),
                 lines: vec!["bb"]
             },
             Block {

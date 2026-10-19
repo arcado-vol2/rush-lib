@@ -66,6 +66,12 @@ impl Color {
         Self { r, g, b }
     }
 }
+impl Color {
+    pub(crate) fn to_hex_tag(&self) -> String {
+        format!("#{:02X}{:02X}{:02X}", self.r, self.g, self.b)
+    }
+}
+
 
 #[derive(Debug, PartialEq, Copy, Clone)]
 pub(crate) enum RefKind {

@@ -149,7 +149,6 @@ fn collapse_blanks<'a>(line: Cow<'a, str>) -> Cow<'a, str> {
     Cow::Owned(line.split(is_blank).filter(|w| !w.is_empty()).collect::<Vec<_>>().join(" "))
 }
 
-
 pub(crate) fn clear_name_attribute_in<'a>(line: &'a str, ctx: InlineContext) -> Cow<'a, str> {
     let Some(first) = line.find(is_should_be_changed_on_name) else {
         return collapse_blanks(Cow::Borrowed(line));
@@ -277,6 +276,16 @@ pub(crate) fn clear_name_attribute_in<'a>(line: &'a str, ctx: InlineContext) -> 
         }
     }
     return collapse_blanks(Cow::Owned(out));
+}
+
+pub(crate) fn parse_note_line(line: &str) -> Option<(u16, &str)> {
+    let rest = NOTE_TAG.strip(line.strip_prefix(MARK)?)?;
+    let (num, text) = rest.split_at(rest.find(is_blank)?);
+    let text = text.trim_matches(is_blank);
+    if num.is_empty() || !num.bytes().all(|b| b.is_ascii_digit()) || text.is_empty() {
+        return None;
+    }
+    num.parse::<u16>().ok().map(|n| (n, text))
 }
 
 pub(crate) fn clear_name_link<'a>(line: &'a str) -> Cow<'a, str> {
@@ -1238,6 +1247,17 @@ pub(crate) fn generate_pre_spans<'a>(preparsed: PreparsedLines<'a>) -> Vec<PreSp
     fn check_line_note_ref_overflow_is_text() {
         check_pre(vec!["a\\*70000 b"], vec![s("a"), s("*70000 b"), Space], vec![]);
         check_pre(vec!["a\\*65535"], vec![s("a"), Note(65535), Space], vec![]);
+    }
+
+    #[test]
+    fn check_line_parse_note_line() {
+        assert_eq!(parse_note_line("\\**1 текст"), Some((1, "текст")));
+        assert_eq!(parse_note_line("\\**01\t \tтекст сноски"), Some((1, "текст сноски")));
+        assert_eq!(parse_note_line("\\**0 a"), Some((0, "a")));
+        assert_eq!(parse_note_line("\\**65535 a"), Some((65535, "a")));
+        for line in ["\\**", "\\**1", "\\**1текст", "\\**70000 a", "\\**a a", "\\**-1 a", "\\**+1 a", "\\** 1 a", "\\ **1 a", "\\*1 a", "**1 a"] {
+            assert_eq!(parse_note_line(line), None, "вход: {line:?}");
+        }
     }
 
     #[test]
