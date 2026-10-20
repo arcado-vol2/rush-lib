@@ -1,0 +1,8 @@
+[document]
+style="gostlike"
+out="html"
+
+[build]
+input="src"
+output="out"
+

@@ -51,6 +51,13 @@ impl<'a> NamedLinkable<'a> {
         self.counter+=1;
         *self.data.entry(name).or_insert(self.counter)
     }
+
+    fn register_anon(&mut self) -> u16 {
+        if self.counter < u16::MAX {
+            self.counter+=1;
+        }
+        self.counter
+    }
 }
 
 impl<'a> Default for NamedLinkable<'a> {
@@ -88,18 +95,26 @@ impl <'a> InnerProjectLinks<'a> {
         }
     }
 
-    fn register_named(&mut self, kind: RefKind, raw_name: &'a str) -> Named<&'a str> {
+    fn register_named(&mut self, kind: RefKind, raw_name: Option<&'a str>) -> Named<&'a str> {
         let linkable = self.named_linkable_mut(kind);
-        let ctx = match kind {
-            RefKind::Image => InlineContext::ImageName,
-            _ => InlineContext::Name
-        };
-        match resolve_name(raw_name) {
-            Some(name) if linkable.counter < u16::MAX => {
-                let id = linkable.register(clear_name_attribute_in(name, ctx));
-                Named::WithName { name, index: id }
-            },
-            _ => Named::Anonymous
+        if let Some(raw_name) = raw_name {
+            let ctx = match kind {
+                RefKind::Image => InlineContext::ImageName,
+                _ => InlineContext::Name
+            };
+            match resolve_name(raw_name) {
+                Some(name) if linkable.counter < u16::MAX => {
+                    let id = linkable.register(clear_name_attribute_in(name, ctx));
+                    Named::WithName { name, index: id }
+                },
+                _ => {
+                    let id = linkable.register_anon();
+                    Named::Anonymous {index: id}
+                }
+            }
+        } else {
+            let id = linkable.register_anon();
+            return Named::Anonymous { index: id };
         }
     }
 
@@ -372,7 +387,7 @@ pub(crate) fn split_blocks<'a>(source: &'a str) -> FlatLexedProject<'a> {
                     },
                     LineKind::CodeOpen => {
                         if search_for_pair(&lines, &current, Some(LineKind::CodeOpen), LineKind::CodeClose) {
-                            let named = project.links.register_named(RefKind::Code, line.thinned);
+                            let named = project.links.register_named(RefKind::Code, Some(line.thinned));
                             flush(&mut project.blocks, None, BlockKind::Code(named), &mut par_is_open);
                             inner_block = OpenBlockKind::Code;
                         } else {
@@ -389,7 +404,7 @@ pub(crate) fn split_blocks<'a>(source: &'a str) -> FlatLexedProject<'a> {
                     },
                     LineKind::FormulaOpen => {
                         if search_for_pair(&lines, &current, Some(LineKind::FormulaOpen), LineKind::FormulaClose) {
-                            let named = project.links.register_named(RefKind::Formula, line.thinned);
+                            let named = project.links.register_named(RefKind::Formula, Some(line.thinned));
                             flush(&mut project.blocks, None, BlockKind::Formula(named), &mut par_is_open);
                             inner_block = OpenBlockKind::Formula;
                         } else {
@@ -400,8 +415,8 @@ pub(crate) fn split_blocks<'a>(source: &'a str) -> FlatLexedProject<'a> {
                         let parts = split_image_params(line.thinned);
                         let path = parts[0].trim_matches(is_blank);
                         let named = match parts.get(1) {
-                            Some(name) => project.links.register_named(RefKind::Image, name.trim_matches(is_blank)),
-                            None => Named::Anonymous
+                            Some(name) => project.links.register_named(RefKind::Image, Some(name.trim_matches(is_blank))),
+                            None =>  project.links.register_named(RefKind::Image, None),
                         };
                         flush(&mut project.blocks, Some(path), BlockKind::Image(ImageKind {scale, named}), &mut par_is_open);
                     },
@@ -452,7 +467,7 @@ pub(crate) fn split_blocks<'a>(source: &'a str) -> FlatLexedProject<'a> {
                                         inner_block = OpenBlockKind::None;
                                         break;
                                     } else {
-                                        let named = project.links.register_named(RefKind::Table, line.thinned);
+                                        let named = project.links.register_named(RefKind::Table, Some(line.thinned));
                                         flush(&mut project.blocks, None, BlockKind::Table(named), &mut par_is_open);
                                         inner_block = OpenBlockKind::Table;
                                         break;
@@ -547,6 +562,10 @@ use crate::parse::{common::*, block_fragmentation::{FlatLexedProject, InnerProje
             counter: items.iter().map(|&(_, index)| index).max().unwrap_or(0),
             data: items.iter().map(|&(name, index)| (Cow::Borrowed(name), index)).collect()
         }
+    }
+
+    fn anon<'a>(counter: u16) -> NamedLinkable<'a> {
+        NamedLinkable { counter, data: Default::default() }
     }
 
     #[test]
@@ -919,12 +938,16 @@ use crate::parse::{common::*, block_fragmentation::{FlatLexedProject, InnerProje
     fn block_check_code_anon() {
         let source = "\\// 0\naa\n\\//";
         let out = split_blocks(source);
-        let expected = project(vec![
-            Block {
-                kind: BlockKind::Code(Named::Anonymous),
-                lines: vec!["aa"]
-            }
-        ]);
+        let expected = FlatLexedProject {
+            links: InnerProjectLinks { code: anon(1), ..Default::default() },
+            blocks: vec![
+                Block {
+                    kind: BlockKind::Code(Named::Anonymous{index: 1}),
+                    lines: vec!["aa"]
+                }
+            ],
+            ..Default::default()
+        };
         assert_eq!(out, expected);
     }
 
@@ -1292,12 +1315,16 @@ use crate::parse::{common::*, block_fragmentation::{FlatLexedProject, InnerProje
     fn block_check_formula_anon() {
         let source = "\\$ 0\naa\n\\$";
         let out = split_blocks(source);
-        let expected = project(vec![
-            Block {
-                kind: BlockKind::Formula(Named::Anonymous),
-                lines: vec!["aa"]
-            }
-        ]);
+        let expected = FlatLexedProject {
+            links: InnerProjectLinks { formulas: anon(1), ..Default::default() },
+            blocks: vec![
+                Block {
+                    kind: BlockKind::Formula(Named::Anonymous{index: 1}),
+                    lines: vec!["aa"]
+                }
+            ],
+            ..Default::default()
+        };
         assert_eq!(out, expected);
     }
 
@@ -2259,12 +2286,16 @@ use crate::parse::{common::*, block_fragmentation::{FlatLexedProject, InnerProje
     fn block_check_image_anon() {
         let source = "\\(aa, 0)";
         let out = split_blocks(source);
-        let expected = project(vec![
-            Block {
-                kind: BlockKind::Image(ImageKind { named: Named::Anonymous, scale: 100}),
-                lines: vec!["aa"]
-            }
-        ]);
+        let expected = FlatLexedProject {
+            links: InnerProjectLinks { images: anon(1), ..Default::default() },
+            blocks: vec![
+                Block {
+                    kind: BlockKind::Image(ImageKind { named: Named::Anonymous{index: 1}, scale: 100}),
+                    lines: vec!["aa"]
+                }
+            ],
+            ..Default::default()
+        };
         assert_eq!(out, expected);
     }
 
@@ -2362,12 +2393,16 @@ use crate::parse::{common::*, block_fragmentation::{FlatLexedProject, InnerProje
     fn block_check_image_p_one_param() {
         let source = "\\(aa)";
         let out = split_blocks(source);
-        let expected = project(vec![
-            Block {
-                kind: BlockKind::Image(ImageKind { named: Named::Anonymous, scale: 100 }),
-                lines: vec!["aa"]
-            }
-        ]);
+        let expected = FlatLexedProject {
+            links: InnerProjectLinks { images: anon(1), ..Default::default() },
+            blocks: vec![
+                Block {
+                    kind: BlockKind::Image(ImageKind { named: Named::Anonymous{index: 1}, scale: 100 }),
+                    lines: vec!["aa"]
+                }
+            ],
+            ..Default::default()
+        };
         assert_eq!(out, expected);
     }
 
@@ -2877,12 +2912,16 @@ use crate::parse::{common::*, block_fragmentation::{FlatLexedProject, InnerProje
     fn block_check_table_anon() {
         let source = "\\№ 0\n/ aa /\n\\№-\n/ bb /\n\\№";
         let out = split_blocks(source);
-        let expected = project(vec![
-            Block {
-                kind: BlockKind::Table(Named::Anonymous),
-                lines: vec!["/ aa /", "\\№-", "/ bb /"]
-            }
-        ]);
+        let expected = FlatLexedProject {
+            links: InnerProjectLinks { tables: anon(1), ..Default::default() },
+            blocks: vec![
+                Block {
+                    kind: BlockKind::Table(Named::Anonymous{index: 1}),
+                    lines: vec!["/ aa /", "\\№-", "/ bb /"]
+                }
+            ],
+            ..Default::default()
+        };
         assert_eq!(out, expected);
     }
 
@@ -3192,10 +3231,14 @@ use crate::parse::{common::*, block_fragmentation::{FlatLexedProject, InnerProje
     #[test]
     fn block_check_image_empty() {
         let out = split_blocks("\\()");
-        assert_eq!(out, project(vec![Block {
-            kind: BlockKind::Image(ImageKind { named: Named::Anonymous, scale: 100 }),
-            lines: vec![""]
-        }]));
+        assert_eq!(out, FlatLexedProject {
+            links: InnerProjectLinks { images: anon(1), ..Default::default() },
+            blocks: vec![Block {
+                kind: BlockKind::Image(ImageKind { named: Named::Anonymous{index: 1}, scale: 100 }),
+                lines: vec![""]
+            }],
+            ..Default::default()
+        });
     }
 
     #[test]
@@ -3239,7 +3282,7 @@ use crate::parse::{common::*, block_fragmentation::{FlatLexedProject, InnerProje
     fn block_check_code_trailing_blanks_trimmed() {
         let out = split_blocks("\\// 0\n    fn a() {  \t\n\n}\t\n\\//");
         assert_eq!(out.blocks, vec![Block {
-            kind: BlockKind::Code(Named::Anonymous),
+            kind: BlockKind::Code(Named::Anonymous{index: 1}),
             lines: vec!["    fn a() {", "", "}"]
         }]);
     }

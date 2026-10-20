@@ -1,11 +1,12 @@
 use std::{path::PathBuf, vec};
 use std::fmt;
 
-use crate::parse::{block_fragmentation::{Block, BlockKind, InnerProjectLinks, split_blocks, unescape_image_path}, common::*, lexemas::{BULLET_LIST, MARK, NUMERIC_LIST, TAB, TAB_WIDTH, TABLE_CENTER, TABLE_FUL_SEP, TABLE_LEFT, TABLE_MERGE_LEFT_TAG, TABLE_MERGE_UP_LEFT_TAG, TABLE_MERGE_UP_TAG, TABLE_RIGHT, TABLE_SEP, is_blank}, line_parse::{InlineContext, InlinePreEl, PreSpan, PreStyle, PreparsedLines, generate_pre_spans, parse_note_line}, link_project::GlobalProject};
+use crate::parse::{block_fragmentation::{Block, BlockKind, InnerProjectLinks, split_blocks, unescape_image_path}, common::*, lexemas::{BULLET_LIST, MARK, NUMERIC_LIST, TAB, TAB_WIDTH, TABLE_CENTER, TABLE_FUL_SEP, TABLE_LEFT, TABLE_MERGE_LEFT_TAG, TABLE_MERGE_UP_LEFT_TAG, TABLE_MERGE_UP_TAG, TABLE_RIGHT, TABLE_SEP, is_blank}, line_parse::{InlineContext, InlinePreEl, PreSpan, PreStyle, PreparsedLines, generate_pre_spans, parse_note_line}};
+use crate::resources::{Resources, Id, ImageId, FileId};
 #[derive(Debug)]
 pub(crate) enum OuterLink<'a> {
     URL(&'a str),
-    File(PathBuf)
+    File(Id<FileId>)
 }
 #[derive(Debug)]
 pub(crate) struct InnerLink {
@@ -58,12 +59,12 @@ pub(crate) struct Span<'a> {
 }
 
 impl<'a> Span<'a> {
-    fn from_pre_span(pre: PreSpan<'a>, refs_allowed: bool, outer_links: &GlobalProject, inner_links: &InnerProjectLinks) -> Self {
+    fn from_pre_span(pre: PreSpan<'a>, refs_allowed: bool, outer_links: &Resources, inner_links: &InnerProjectLinks) -> Self {
         let PreStyle {is_bold, is_italic, is_mono, is_strike, is_under, color, link} = pre.style;
         let link: Option<OuterLink> = match link {
             Some(pre_link) => {
-                match outer_links.get_file(pre_link) {
-                    Some(path) => Some(OuterLink::File(path)),
+                match outer_links.get_file_id(pre_link) {
+                    Some(id) => Some(OuterLink::File(id)),
                     None => Some(OuterLink::URL(pre_link))
                 }
             }
@@ -87,7 +88,7 @@ impl<'a> Span<'a> {
 
 
 
-fn parse_generic_block<'a> (lines: Vec<&'a str>, ctx: InlineContext, outer_links: &GlobalProject, inner_links: &InnerProjectLinks) -> Vec<Span<'a>>{
+fn parse_generic_block<'a> (lines: Vec<&'a str>, ctx: InlineContext, outer_links: &Resources, inner_links: &InnerProjectLinks) -> Vec<Span<'a>>{
     let preparsed = PreparsedLines::new(lines, ctx);
     let pre_spans = generate_pre_spans(preparsed);
     let mut content = Vec::new();
@@ -113,22 +114,22 @@ pub(crate) struct Header<'a> {
 
 #[derive(Debug)]
 pub(crate) struct Comment<'a> {
-    content: Vec<Span<'a>>
+    pub(crate) content: Vec<Span<'a>>
 }
 #[derive(Debug)]
 pub(crate) struct Formula<'a> {
-    named: Named<Vec<Span<'a>>>,
-    content: Vec<&'a str>
+    pub(crate) named: Named<Vec<Span<'a>>>,
+    pub(crate) content: Vec<&'a str>
 }
 #[derive(Debug)]
 pub(crate) struct Code<'a> {
-    named: Named<Vec<Span<'a>>>,
-    content: Vec<&'a str>
+    pub(crate) named: Named<Vec<Span<'a>>>,
+    pub(crate) content: Vec<&'a str>
 }
 #[derive(Debug)]
 pub(crate) struct Image<'a> {
-    meta: ImageKind<Vec<Span<'a>>>,
-    path: Option<PathBuf>
+    pub(crate) meta: ImageKind<Vec<Span<'a>>>,
+    pub(crate) path: Option<Id<ImageId>>
 }
 #[derive(Debug)]
 pub(crate) struct NoteItem<'a> {
@@ -146,15 +147,15 @@ pub(crate) enum ListElKind<'a> {
 }
 #[derive(Debug)]
 pub(crate) struct ListEl<'a> {
-    this: Option<ListElKind<'a>>,
-    children: Vec<ListEl<'a>>
+    pub(crate) this: Option<ListElKind<'a>>,
+    pub(crate) children: Vec<ListEl<'a>>
 }
  #[derive(Debug)]
 pub(crate) struct List<'a> {
-    content: Vec<ListEl<'a>>
+    pub(crate) content: Vec<ListEl<'a>>
 }
 impl<'a> List<'a> {
-    fn build(out: &mut Vec<ListEl<'a>>,  lines: &[&'a str], outer_links: &GlobalProject, inner_links: &InnerProjectLinks, level: u16) -> usize {
+    fn build(out: &mut Vec<ListEl<'a>>,  lines: &[&'a str], outer_links: &Resources, inner_links: &InnerProjectLinks, level: u16) -> usize {
         let mut i =0;
         while i < lines.len() {
             let (l_text, l_level, l_is_bullet) = Self::parse_line(lines[i]);
@@ -208,8 +209,8 @@ impl<'a> List<'a> {
     }
 }
 
-#[derive(Debug)]
-enum Aligment {
+#[derive(Debug, Clone, Copy)]
+pub(crate) enum Aligment {
     Left,
     Center,
     Right
@@ -220,12 +221,13 @@ impl Default for Aligment {
     }
 }
 #[derive(Debug)]
-enum TableEl<'a> {
+pub(crate) enum TableEl<'a> {
     Cell(Vec<Span<'a>>),
     MergeLeft,
     MergeUp,
     MergeUpLeft
 }
+
 
 
 fn split_table_cells(line: &str) -> Vec<&str> {
@@ -247,13 +249,13 @@ fn split_table_cells(line: &str) -> Vec<&str> {
 
 #[derive(Debug)]
 pub(crate) struct Table<'a> {
-    named: Named<Vec<Span<'a>>>,
-    headers: Vec<Vec<TableEl<'a>>>,
-    aligments: Vec<Aligment>,
-    cells: Vec<Vec<TableEl<'a>>>,
+    pub(crate) named: Named<Vec<Span<'a>>>,
+    pub(crate) headers: Vec<Vec<TableEl<'a>>>,
+    pub(crate) aligments: Vec<Aligment>,
+    pub(crate) cells: Vec<Vec<TableEl<'a>>>,
 }
 impl<'a> Table<'a> {
-    fn new(named: Named<Vec<Span<'a>>>, lines: Vec<&'a str>, outer_links: &GlobalProject, inner_links: &InnerProjectLinks) -> Self {
+    fn new(named: Named<Vec<Span<'a>>>, lines: Vec<&'a str>, outer_links: &Resources, inner_links: &InnerProjectLinks) -> Self {
         let sep = lines.iter()
             .position(|l| TABLE_FUL_SEP.strip(l).is_some())
             .expect("table block without separator");
@@ -307,8 +309,9 @@ impl<'a> Table<'a> {
         }).collect()
     }
 
-    fn parse_table_line(line: &'a str, outer_links: &GlobalProject, inner_links: &InnerProjectLinks) -> Vec<TableEl<'a>> {
+    fn parse_table_line(line: &'a str, outer_links: &Resources, inner_links: &InnerProjectLinks) -> Vec<TableEl<'a>> {
         let pieces = split_table_cells(line);
+
         pieces[1..pieces.len() - 1].iter().map(
             |&raw| {
                 if TABLE_MERGE_LEFT_TAG.is(raw) {
@@ -342,7 +345,7 @@ pub(crate) enum Node<'a> {
     Table(Table<'a>)
 }
 impl<'a> Node<'a> {
-    fn build_from_block(block: Block<'a>, outer_links: &GlobalProject, inner_links: &InnerProjectLinks) -> Self {
+    fn build_from_block(block: Block<'a>, outer_links: &Resources, inner_links: &InnerProjectLinks) -> Self {
         match block.kind {
             BlockKind::Paragraph => {
                 let spans = parse_generic_block(block.lines, InlineContext::Text, outer_links, inner_links);
@@ -378,7 +381,7 @@ impl<'a> Node<'a> {
             BlockKind::Image(img) => {
                 Self::Image(Image {
                      meta: img.map(|s| parse_generic_block(vec![s], InlineContext::ImageName, outer_links, inner_links)),
-                     path: block.lines.first().and_then(|s| outer_links.get_image(&unescape_image_path(s)))
+                     path: block.lines.first().and_then(|s| outer_links.get_image_id(&unescape_image_path(s)))
                 })
             },
             BlockKind::List => {
@@ -474,7 +477,7 @@ where
 }
 
 impl<'a> Rush<'a> {
-    pub(crate) fn new(source: &'a str,  global_project: &GlobalProject) -> Self {
+    pub(crate) fn new(source: &'a str,  global_project: &Resources) -> Self {
         let lexed_project = split_blocks(source);
         let mut out = Self {nodes: Vec::new()};
 
@@ -490,12 +493,13 @@ impl<'a> Rush<'a> {
 
 #[cfg(test)] mod test {
     use std::collections::HashMap;
-    use crate::parse::{rush::*, link_project::GlobalProject};
+    use crate::parse::{rush::*};
+    use crate::resources::*;
 
-    fn empty_gp() -> GlobalProject {
-        GlobalProject {
-            images: HashMap::new(),
-            files: HashMap::new()
+    fn empty_gp() -> Resources {
+        Resources {
+            images: ResTable::default(),
+            files: ResTable::default()
         }
     }
 
@@ -657,7 +661,7 @@ impl<'a> Rush<'a> {
         let gp = empty_gp();
         let out = Rush::new("\\(a.png, Схема_, вариант)", &gp);
         match &out.nodes[..] {
-            [Node::Image(Image { meta: ImageKind { named: Named::WithName { name, .. }, .. }, .. })] =>
+            [Node::Image(Image { meta: ImageKind { named: Named::WithName { name, .. }, .. }, path: None })] =>
                 assert_eq!(spans_text(name), "Схема, вариант"),
             other => panic!("{other:?}")
         }

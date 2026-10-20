@@ -45,6 +45,7 @@ pub(crate) fn is_blank(c: char) -> bool{
 }
 
 
+
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct Tag<const N: usize, const V: usize = 1> {
     pub(crate) variants: [[char; N]; V],

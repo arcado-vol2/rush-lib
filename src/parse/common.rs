@@ -23,17 +23,16 @@ impl<T> ImageKind<T> {
     }
 }
 
-/// T -name representation: a raw string with block-level markup, with spans parsed into models
 #[derive(PartialEq, Debug)]
 pub(crate) enum Named<T> {
     WithName { name: T, index: u16 },
-    Anonymous
+    Anonymous {index: u16}
 }
 impl<T> Named<T> {
     pub(crate) fn map<U>(self, f: impl FnOnce(T) -> U) -> Named<U> {
         match self {
             Named::WithName { name, index } => Named::WithName { name: f(name), index },
-            Named::Anonymous => Named::Anonymous
+            Named::Anonymous {index} => Named::Anonymous {index}
         }
     }
 }

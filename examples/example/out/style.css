@@ -117,8 +117,7 @@ div.code {
 }
 div.code > .index, div.code > .name { display: inline; }
 div.code > .body { border: 1px solid var(--ink); }
-div.code > .body > code {
-  display: block;
+div.code > .body > pre {
   margin: 0;
   padding: 6pt 8pt;
   font-family: var(--mono);
@@ -127,6 +126,9 @@ div.code > .body > code {
   white-space: pre;
   overflow-x: auto;
   tab-size: 4;
+}
+div.code > .body > pre > code {
+  font: inherit;
 }
 
 div.image {
@@ -142,6 +144,7 @@ div.image > .index { grid-row: 2; grid-column: 2; }
 div.image > .name { grid-row: 2; grid-column: 3; text-align: left; }
 div.image > .body > img {
   max-width: 100%; height: auto;
+  vertical-align: top;
 }
 
 div.note {

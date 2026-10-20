@@ -100,6 +100,7 @@ fn is_should_be_changed_on_name(ch: char) -> bool {
     ch == SHIELD || ch ==MARK || ch == SMALL_YO || ch.is_uppercase()
 }
 
+
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub(crate) enum InlineContext {
     Text,
@@ -148,6 +149,7 @@ fn collapse_blanks<'a>(line: Cow<'a, str>) -> Cow<'a, str> {
     }
     Cow::Owned(line.split(is_blank).filter(|w| !w.is_empty()).collect::<Vec<_>>().join(" "))
 }
+
 
 pub(crate) fn clear_name_attribute_in<'a>(line: &'a str, ctx: InlineContext) -> Cow<'a, str> {
     let Some(first) = line.find(is_should_be_changed_on_name) else {
