@@ -53,6 +53,13 @@ pub(crate) struct Config {
     pub(crate) out: DocOut,
     pub(crate) input: PathBuf,
     pub(crate) output: PathBuf,
+    pub(crate) content: Vec<ContentEntry>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct ContentEntry {
+    pub(crate) name: String,
+    pub(crate) path: String,
 }
 
 impl Default for Config {
@@ -62,6 +69,7 @@ impl Default for Config {
             out: DocOut::default(),
             input: PathBuf::from("src"),
             output: PathBuf::from("out"),
+            content: Vec::new(),
         }
     }
 }
@@ -74,6 +82,11 @@ pub enum ConfigWarning {
     WrongType { key: &'static str },
     UnknownValue { key: &'static str, value: String },
     EmptyPath { key: &'static str },
+    ContentMissingKey { index: usize, key: &'static str },
+    ContentWrongType { index: usize, key: &'static str },
+    ContentEmptyPath { index: usize },
+    UnknownContentPath(String),
+    DuplicateContent(String),
 }
 
 
@@ -82,6 +95,7 @@ pub enum ConfigWarning {
 struct RawProjectFile {
     document: RawDocument,
     build: RawBuild,
+    content: Option<toml::Value>,
 }
 
 #[derive(Deserialize, Default)]
@@ -133,6 +147,9 @@ impl Config {
         if let Some(output) = path_param(raw.build.output, "build.output", &mut warnings) {
             out.output = output;
         }
+        if let Some(content) = raw.content {
+            out.content = content_param(content, &mut warnings);
+        }
         (out, warnings)
     }
 }
@@ -153,6 +170,39 @@ fn path_param(
             None
         }
     }
+}
+
+fn content_param(value: toml::Value, warnings: &mut Vec<ConfigWarning>) -> Vec<ContentEntry> {
+    let toml::Value::Array(items) = value else {
+        warnings.push(ConfigWarning::WrongType { key: "content" });
+        return Vec::new();
+    };
+    let mut out = Vec::new();
+    for (index, item) in items.into_iter().enumerate() {
+        let toml::Value::Table(mut table) = item else {
+            warnings.push(ConfigWarning::WrongType { key: "content" });
+            continue;
+        };
+        let mut get = |key: &'static str| match table.remove(key) {
+            Some(toml::Value::String(s)) => Some(s),
+            Some(_) => {
+                warnings.push(ConfigWarning::ContentWrongType { index, key });
+                None
+            }
+            None => {
+                warnings.push(ConfigWarning::ContentMissingKey { index, key });
+                None
+            }
+        };
+        let (name, path) = (get("name"), get("path"));
+        let (Some(name), Some(path)) = (name, path) else { continue };
+        if path.is_empty() {
+            warnings.push(ConfigWarning::ContentEmptyPath { index });
+            continue;
+        }
+        out.push(ContentEntry { name, path });
+    }
+    out
 }
 
 fn enum_param<T>(
@@ -293,6 +343,58 @@ out = \"pdf\"");
             ConfigWarning::WrongType { key: "build.input" },
             ConfigWarning::EmptyPath { key: "build.output" },
         ]);
+    }
+
+    fn entry(name: &str, path: &str) -> ContentEntry {
+        ContentEntry { name: name.into(), path: path.into() }
+    }
+
+    #[test]
+    fn content_valid() {
+        let (out, w) = Config::parse("[[content]]
+name = \"Введение\"
+path = \"intro\"
+[[content]]
+name = \"Установка\"
+path = \"guide/install.rush\"");
+        assert_eq!(out.content, vec![entry("Введение", "intro"), entry("Установка", "guide/install.rush")]);
+        assert!(w.is_empty());
+    }
+
+    #[test]
+    fn content_missing_is_empty() {
+        let (out, w) = Config::parse("[document]
+style = \"gost\"");
+        assert!(out.content.is_empty());
+        assert!(w.is_empty());
+    }
+
+    #[test]
+    fn content_bad_entries_skipped() {
+        let (out, w) = Config::parse("[[content]]
+path = \"a\"
+[[content]]
+name = 1
+path = \"b\"
+[[content]]
+name = \"C\"
+path = \"\"
+[[content]]
+name = \"D\"
+path = \"d\"");
+        assert_eq!(out.content, vec![entry("D", "d")]);
+        assert_eq!(w, vec![
+            ConfigWarning::ContentMissingKey { index: 0, key: "name" },
+            ConfigWarning::ContentWrongType { index: 1, key: "name" },
+            ConfigWarning::ContentEmptyPath { index: 2 },
+        ]);
+    }
+
+    #[test]
+    fn content_wrong_type() {
+        let (out, w) = Config::parse("content = \"a\"");
+        assert!(out.content.is_empty());
+        assert_eq!(w, vec![ConfigWarning::WrongType { key: "content" }]);
     }
 
     #[test]

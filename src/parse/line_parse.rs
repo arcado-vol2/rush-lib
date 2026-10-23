@@ -347,7 +347,8 @@ pub(crate) enum InlinePreEl<'a> {
     String(&'a str),
     InnerLink(Cow<'a, str>, RefKind),
     Note(u16),
-    Space
+    Space,
+    LongDash
 }
 
 #[derive(Debug, PartialEq)]
@@ -534,6 +535,11 @@ impl<'a> PreparsedLines<'a> {
                             );
                         }
                     },
+                    DASH if chars.next_if(|&(_, c)| c == DASH).is_some() => {
+                        Self::push_range_to_out(&mut out, line, byte_after_last_tag, i);
+                        out.text.push(InlinePreEl::LongDash);
+                        byte_after_last_tag = i + DASH.len_utf8() + DASH.len_utf8();
+                    }
                     _ => {
                         if let Some(mark) = Self::char_to_mark(ch) {
                             if let Some(opened) = Self::try_pop_stack(&mut open_stack, |t| t.mark == mark){ 
@@ -779,7 +785,6 @@ pub(crate) fn generate_pre_spans<'a>(preparsed: PreparsedLines<'a>) -> Vec<PreSp
     }
 
     // ===== PreparsedLines =====
-
     #[test]
     fn check_line_preparsed_inner_link() {
         check_pre(vec!["раз\\*р(ЖОПА) раз"], vec![s("раз"), inner("жопа", RefKind::Image), s(" раз"), Space], vec![]);
@@ -830,6 +835,21 @@ pub(crate) fn generate_pre_spans<'a>(preparsed: PreparsedLines<'a>) -> Vec<PreSp
         check_pre(vec!["\\=\\-a-="], vec![s("a"), Space], vec![r(Mark::Strike, 0, 1), r(Mark::Under, 0, 1)]);
 
         check_pre(vec!["10:30; итог - 5 = 5!"], vec![s("10:30; итог - 5 = 5!"), Space], vec![]);
+    }
+
+    #[test]
+    fn check_line_preparsed_long_dash() {
+        use super::InlinePreEl::LongDash;
+        check_pre(vec!["a -- b"], vec![s("a "), LongDash, s(" b"), Space], vec![]);
+        check_pre(vec!["--"], vec![LongDash, Space], vec![]);
+        check_pre(vec!["a---b"], vec![s("a"), LongDash, s("-b"), Space], vec![]);
+        check_pre(vec!["кто-то"], vec![s("кто-то"), Space], vec![]);
+        check_pre(
+            vec!["\\-a -- b-"],
+            vec![s("a "), LongDash, s(" b"), Space],
+            vec![r(Mark::Strike, 0, 3)]
+        );
+        check_pre(vec!["a_-_-b"], vec![s("a"), s("-"), s("-b"), Space], vec![]);
     }
 
     #[test]

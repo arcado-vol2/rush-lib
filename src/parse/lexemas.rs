@@ -36,6 +36,7 @@ pub(crate) const BIG_YO: char = 'Ё';
 pub(crate) const SMALL_E: char = 'е';
 pub(crate) const BIG_E: char = 'Е';
 pub(crate) const EXT_DIV: char = '.';
+pub(crate) const DASH: char = '-';
 
 
 pub(crate) const BYTE_SHIELD: u8 = b'_';
@@ -81,26 +82,28 @@ impl<const N: usize, const V: usize> Tag<N, V> {
     }
 }
 
-pub(crate)const CODE_TAG: Tag<2> = Tag::repeat(CODE);
-pub(crate)const COMMENT_TAG: Tag<1> = Tag::repeat(COMMENT);
-pub(crate)const FORMUAL_TAG: Tag<1> = Tag::repeat(FORMULA);
-pub(crate)const TABLE_TAG: Tag<1> = Tag::repeat(TABLE);
-pub(crate)const NOTE_TAG: Tag<2> = Tag::repeat(NOTE);
-pub(crate)const BULLET_LIST_TAG: Tag<1> = Tag::repeat(BULLET_LIST);
-pub(crate)const NUMERIC_LIST_TAG: Tag<1> = Tag::repeat(NUMERIC_LIST);
-pub(crate)const ANON_NAME_TAG: Tag<1> = Tag::repeat(ANON);
+pub(crate) const CODE_TAG: Tag<2> = Tag::repeat(CODE);
+pub(crate) const COMMENT_TAG: Tag<1> = Tag::repeat(COMMENT);
+pub(crate) const FORMUAL_TAG: Tag<1> = Tag::repeat(FORMULA);
+pub(crate) const TABLE_TAG: Tag<1> = Tag::repeat(TABLE);
+pub(crate) const NOTE_TAG: Tag<2> = Tag::repeat(NOTE);
+pub(crate) const BULLET_LIST_TAG: Tag<1> = Tag::repeat(BULLET_LIST);
+pub(crate) const NUMERIC_LIST_TAG: Tag<1> = Tag::repeat(NUMERIC_LIST);
+pub(crate) const ANON_NAME_TAG: Tag<1> = Tag::repeat(ANON);
 /// `\№-`
-pub(crate)const TABLE_FUL_SEP: Tag<3> = Tag::seq([MARK, TABLE, TABLE_FORMAT]);
+pub(crate) const TABLE_FUL_SEP: Tag<3> = Tag::seq([MARK, TABLE, TABLE_FORMAT]);
 /// `\+=` or `\=+`
-pub(crate)const TABLE_MERGE_UP_LEFT_TAG: Tag<3, 2> = Tag::any([
+pub(crate) const TABLE_MERGE_UP_LEFT_TAG: Tag<3, 2> = Tag::any([
     [MARK, TABLE_MERGE_LEFT, TABLE_MERGE_UP],
     [MARK, TABLE_MERGE_UP, TABLE_MERGE_LEFT],
 ]);
 /// `\+`
-pub(crate)const TABLE_MERGE_LEFT_TAG: Tag<2> = Tag::seq([MARK, TABLE_MERGE_LEFT]);
+pub(crate) const TABLE_MERGE_LEFT_TAG: Tag<2> = Tag::seq([MARK, TABLE_MERGE_LEFT]);
 /// `\=`
-pub(crate)const TABLE_MERGE_UP_TAG: Tag<2> = Tag::seq([MARK, TABLE_MERGE_UP]);
+pub(crate) const TABLE_MERGE_UP_TAG: Tag<2> = Tag::seq([MARK, TABLE_MERGE_UP]);
 
+/// `--`
+pub(crate) const LONG_DASH: Tag<2> = Tag::repeat(DASH);
 
 
 pub(crate) const NEW_LINE_BREAK: usize = 2;

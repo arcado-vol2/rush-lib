@@ -1,0 +1,19 @@
+[document]
+style="gost"
+out="html"
+
+[build]
+input="src"
+output="out"
+
+[[content]]
+name="Введение"
+path="введение"
+
+[[content]]
+name="Основная часть"
+path="основная"
+
+[[content]]
+name="Приложение"
+path="приложение/код"

@@ -6,3 +6,18 @@ out="html"
 input="src"
 output="out"
 
+[[content]]
+name="Основной пример"
+path="a"
+
+[[content]]
+name="Раздел"
+path="глава/раздел"
+
+[[content]]
+name="Подраздел"
+path="глава/раздел/подраздел"
+
+[[content]]
+name="Глубже"
+path="глава/раздел/подраздел/глубже"

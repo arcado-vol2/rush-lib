@@ -1,7 +1,7 @@
-use std::{path::PathBuf, vec};
+use std::{borrow::Cow, path::PathBuf, vec};
 use std::fmt;
 
-use crate::parse::{block_fragmentation::{Block, BlockKind, InnerProjectLinks, split_blocks, unescape_image_path}, common::*, lexemas::{BULLET_LIST, MARK, NUMERIC_LIST, TAB, TAB_WIDTH, TABLE_CENTER, TABLE_FUL_SEP, TABLE_LEFT, TABLE_MERGE_LEFT_TAG, TABLE_MERGE_UP_LEFT_TAG, TABLE_MERGE_UP_TAG, TABLE_RIGHT, TABLE_SEP, is_blank}, line_parse::{InlineContext, InlinePreEl, PreSpan, PreStyle, PreparsedLines, generate_pre_spans, parse_note_line}};
+use crate::parse::{block_fragmentation::{Block, BlockKind, Counters, InnerProjectLinks, split_blocks_from, unescape_image_path}, common::*, lexemas::{BULLET_LIST, MARK, NUMERIC_LIST, TAB, TAB_WIDTH, TABLE_CENTER, TABLE_FUL_SEP, TABLE_LEFT, TABLE_MERGE_LEFT_TAG, TABLE_MERGE_UP_LEFT_TAG, TABLE_MERGE_UP_TAG, TABLE_RIGHT, TABLE_SEP, is_blank}, line_parse::{InlineContext, InlinePreEl, PreSpan, PreStyle, PreparsedLines, generate_pre_spans, parse_note_line}};
 use crate::resources::{Resources, Id, ImageId, FileId};
 #[derive(Debug)]
 pub(crate) enum OuterLink<'a> {
@@ -16,9 +16,12 @@ pub(crate) struct InnerLink {
 #[derive(Debug)]
 pub(crate) enum InlineEl<'a> {
     String(&'a str),
-    InnerLink(Option<InnerLink>),
-    Note(Option<u16>),
-    Space
+    /// `Err` - name of the element that could not be found
+    InnerLink(Result<InnerLink, (Cow<'a, str>, RefKind)>),
+    /// `Err` - number of a missing note
+    Note(Result<u16, u16>),
+    Space,
+    LongDash
 }
 pub(crate) struct Style<'a> {
     pub(crate) is_bold: bool,
@@ -59,6 +62,7 @@ pub(crate) struct Span<'a> {
 }
 
 impl<'a> Span<'a> {
+    /// `refs_allowed` - `false` inside an element name, where element references are invalid
     fn from_pre_span(pre: PreSpan<'a>, refs_allowed: bool, outer_links: &Resources, inner_links: &InnerProjectLinks) -> Self {
         let PreStyle {is_bold, is_italic, is_mono, is_strike, is_under, color, link} = pre.style;
         let link: Option<OuterLink> = match link {
@@ -76,11 +80,13 @@ impl<'a> Span<'a> {
             InlinePreEl::String(s) => InlineEl::String(s),
             InlinePreEl::Space => InlineEl::Space,
             InlinePreEl::InnerLink(s, k) => InlineEl::InnerLink(
-                inner_links.resolve(k, &s)
-                    .filter(|_| refs_allowed)
-                    .map(|i| InnerLink { index: i, kind: k })
+                match inner_links.resolve(k, &s).filter(|_| refs_allowed) {
+                    Some(i) => Ok(InnerLink { index: i, kind: k }),
+                    None => Err((s, k))
+                }
             ),
-            InlinePreEl::Note(n) => InlineEl::Note(inner_links.has_note(n).then_some(n))
+            InlinePreEl::LongDash => InlineEl::LongDash,
+            InlinePreEl::Note(n) => InlineEl::Note(if inner_links.has_note(n) {Ok(n)} else {Err(n)})
         }).collect();
         Self { text, style }
     }
@@ -129,7 +135,8 @@ pub(crate) struct Code<'a> {
 #[derive(Debug)]
 pub(crate) struct Image<'a> {
     pub(crate) meta: ImageKind<Vec<Span<'a>>>,
-    pub(crate) path: Option<Id<ImageId>>
+    /// `Err` - path where no image was found
+    pub(crate) path: Result<Id<ImageId>, Cow<'a, str>>
 }
 #[derive(Debug)]
 pub(crate) struct NoteItem<'a> {
@@ -271,6 +278,7 @@ impl<'a> Table<'a> {
         Self { named, headers, aligments, cells }
     }
 
+    /// Pads/truncates rows to `columns` and replaces impossible merges with empty cells
     fn normalize(rows: &mut Vec<Vec<TableEl<'a>>>, columns: usize) {
         for (r, row) in rows.iter_mut().enumerate() {
             row.resize_with(columns, || TableEl::Cell(Vec::new()));
@@ -288,6 +296,7 @@ impl<'a> Table<'a> {
         }
     }
 
+    /// `rest` - everything after `\№-`, outer `/` are optional
     fn parse_aligments(rest: &str, columns: usize) -> Vec<Aligment> {
         let rest = rest.trim_matches(is_blank);
         let mut pieces = split_table_cells(rest);
@@ -381,7 +390,10 @@ impl<'a> Node<'a> {
             BlockKind::Image(img) => {
                 Self::Image(Image {
                      meta: img.map(|s| parse_generic_block(vec![s], InlineContext::ImageName, outer_links, inner_links)),
-                     path: block.lines.first().and_then(|s| outer_links.get_image_id(&unescape_image_path(s)))
+                     path: {
+                        let path = block.lines.first().map_or(Cow::Borrowed(""), |s| unescape_image_path(s));
+                        outer_links.get_image_id(&path).ok_or(path)
+                     }
                 })
             },
             BlockKind::List => {
@@ -460,7 +472,9 @@ impl<'a> fmt::Debug for Node<'a> {
 
 
 pub(crate) struct Rush<'a> {
-    pub(crate) nodes: Vec<Node<'a>>
+    pub(crate) nodes: Vec<Node<'a>>,
+    /// numbering counters after the last element
+    pub(crate) counters: Counters,
 }
 
 impl<'a> fmt::Debug for Rush<'a>
@@ -478,8 +492,13 @@ where
 
 impl<'a> Rush<'a> {
     pub(crate) fn new(source: &'a str,  global_project: &Resources) -> Self {
-        let lexed_project = split_blocks(source);
-        let mut out = Self {nodes: Vec::new()};
+        Self::new_from(source, global_project, Counters::default())
+    }
+
+    /// Numbering continues from `start`; the totals go to `counters`, the next file starts from them
+    pub(crate) fn new_from(source: &'a str, global_project: &Resources, start: Counters) -> Self {
+        let (lexed_project, counters) = split_blocks_from(source, start);
+        let mut out = Self {nodes: Vec::new(), counters};
 
         for block in lexed_project.blocks {
             out.nodes.push(Node::build_from_block(block, global_project, &lexed_project.links));
@@ -624,12 +643,12 @@ impl<'a> Rush<'a> {
         let refs: Vec<_> = table_name(&out.nodes[1]).iter()
             .flat_map(|s| s.text.iter())
             .filter_map(|el| match el {
-                InlineEl::InnerLink(l) => Some(format!("link {}", l.is_some())),
+                InlineEl::InnerLink(l) => Some(format!("link {}", l.is_ok())),
                 InlineEl::Note(n) => Some(format!("note {n:?}")),
                 _ => None
             })
             .collect();
-        assert_eq!(refs, vec!["link false", "note Some(1)"]);
+        assert_eq!(refs, vec!["link false", "note Ok(1)"]);
     }
 
     #[test]
@@ -638,7 +657,7 @@ impl<'a> Rush<'a> {
         let out = Rush::new("см. \\*т(Позже)\n\n\\№ Позже\n/ a /\n\\№-\n\\№", &gp);
         match &out.nodes[0] {
             Node::Paragraph(p) => assert!(p.content.iter().flat_map(|s| s.text.iter())
-                .any(|el| matches!(el, InlineEl::InnerLink(Some(InnerLink { index: 1, .. }))))),
+                .any(|el| matches!(el, InlineEl::InnerLink(Ok(InnerLink { index: 1, .. }))))),
             other => panic!("{other:?}")
         }
     }
@@ -657,11 +676,30 @@ impl<'a> Rush<'a> {
     }
 
     #[test]
+    fn counters_continue_between_files() {
+        let gp = empty_gp();
+        let src = "\\++ Раздел\n\n\\№ Т\n/ a /\n\\№-\n\\№\n\n\\(a.png, Р)\n\n\\// Л\nx\n\\//\n\n\\$ Ф\nx\n\\$";
+        let first = Rush::new(src, &gp);
+        assert_eq!(first.counters.tables, 1);
+        let second = Rush::new_from(src, &gp, first.counters);
+        let indexes: Vec<String> = second.nodes.iter().map(|n| match n {
+            Node::Header(h) => format!("h{:?}", &h.index[..2]),
+            Node::Table(Table { named: Named::WithName { index, .. }, .. }) => format!("t{index}"),
+            Node::Image(Image { meta: ImageKind { named: Named::WithName { index, .. }, .. }, .. }) => format!("i{index}"),
+            Node::Code(Code { named: Named::WithName { index, .. }, .. }) => format!("c{index}"),
+            Node::Formula(Formula { named: Named::WithName { index, .. }, .. }) => format!("f{index}"),
+            other => panic!("{other:?}")
+        }).collect();
+        assert_eq!(indexes, vec!["h[1, 2]", "t2", "i2", "c2", "f2"]);
+        assert_eq!(second.counters.formulas, 2);
+    }
+
+    #[test]
     fn image_caption_escaped_comma() {
         let gp = empty_gp();
         let out = Rush::new("\\(a.png, Схема_, вариант)", &gp);
         match &out.nodes[..] {
-            [Node::Image(Image { meta: ImageKind { named: Named::WithName { name, .. }, .. }, path: None })] =>
+            [Node::Image(Image { meta: ImageKind { named: Named::WithName { name, .. }, .. }, path: Err(_) })] =>
                 assert_eq!(spans_text(name), "Схема, вариант"),
             other => panic!("{other:?}")
         }

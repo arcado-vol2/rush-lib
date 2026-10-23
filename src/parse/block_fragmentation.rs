@@ -141,6 +141,16 @@ impl<'a> Default for InnerProjectLinks<'a> {
 }
 
 
+/// All numbering counters; when files are joined, the next file continues from the previous totals
+#[derive(Debug, PartialEq, Default, Clone, Copy)]
+pub(crate) struct Counters {
+    pub(crate) header: HeaderCounter,
+    pub(crate) code: u16,
+    pub(crate) formulas: u16,
+    pub(crate) images: u16,
+    pub(crate) tables: u16,
+}
+
 #[derive(Debug, PartialEq, Default)]
 pub(crate) struct FlatLexedProject<'a> {
     pub(crate) links: InnerProjectLinks<'a>,
@@ -354,11 +364,20 @@ fn resolve_name<'a>(name_line: &'a str) -> Option<&'a str> {
 
 
 pub(crate) fn split_blocks<'a>(source: &'a str) -> FlatLexedProject<'a> {
+    split_blocks_from(source, Counters::default()).0
+}
+
+/// `start` - counters to continue numbering from; the final counters are returned second
+pub(crate) fn split_blocks_from<'a>(source: &'a str, start: Counters) -> (FlatLexedProject<'a>, Counters) {
     let source = source.strip_prefix('\u{FEFF}').unwrap_or(source);
     let mut project = FlatLexedProject::default();
-    let mut par_is_open = false; 
+    project.links.code.counter = start.code;
+    project.links.formulas.counter = start.formulas;
+    project.links.images.counter = start.images;
+    project.links.tables.counter = start.tables;
+    let mut par_is_open = false;
     let lines: Vec<ClassifiedLine> = source.split_inclusive('\n').map(|l| ClassifiedLine::new(l)).collect();
-    let mut header_counter = HeaderCounter::default();
+    let mut header_counter = start.header;
     let mut current: usize = 0;
     let mut inner_block = OpenBlockKind::None;
     fn flush_par<'a>(out: &mut Vec<Block<'a>>, line: &'a str, par_is_open: &mut bool) {
@@ -539,8 +558,15 @@ pub(crate) fn split_blocks<'a>(source: &'a str) -> FlatLexedProject<'a> {
             }
         
         current+=1;
-    }   
-    project
+    }
+    let counters = Counters {
+        header: header_counter,
+        code: project.links.code.counter,
+        formulas: project.links.formulas.counter,
+        images: project.links.images.counter,
+        tables: project.links.tables.counter,
+    };
+    (project, counters)
 }
 
 

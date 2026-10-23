@@ -34,7 +34,7 @@ pub(crate) struct Id<K> {
     _kind: PhantomData<K>
 }
 impl<K> Id<K> {
-    fn new(idx: usize) -> Self {
+    pub(crate) fn new(idx: usize) -> Self {
         Self {idx, _kind: PhantomData}
     }
 }
@@ -166,6 +166,11 @@ impl Resources {
     pub(crate) fn root_href(&self, from: Id<FileId>, target: &str) -> String {
         let from_dir = self.files.local_path(from).parent().unwrap();
         relative_path(from_dir, Path::new(target))
+    }
+
+    /// Resource path relative to the output root
+    pub(crate) fn root_relative<K: ResKind>(&self, to: Id<K>) -> String {
+        relative_path(Path::new(""), K::table(self).local_path(to))
     }
 
     pub(crate) fn copy_tree(&self, new_root: &Path) -> io::Result<()> {
