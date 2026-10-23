@@ -474,9 +474,9 @@ impl Flow {
         let (body, img_h) = match image.path {
             Ok(id) => {
                 let local = ctx.res.images.local_path(id).to_string_lossy().into_owned();
-                let (w, h) = match imagesize::size(ctx.res.images.global_path(id)) {
-                    Ok(sz) => (sz.width as f32 * PX * scale, sz.height as f32 * PX * scale),
-                    Err(_) => {
+                let (w, h) = match *ctx.res.images.data(id) {
+                    Some((w, h)) => (w as f32 * PX * scale, h as f32 * PX * scale),
+                    None => {
                         ctx.warn.push(RenderWarning::ImageSizeUnknown(local));
                         (TEXT_W / 2.0, TEXT_W * 3.0 / 8.0)
                     }

@@ -1,36 +1,30 @@
-use std::{fs, io, path::PathBuf};
+use std::{fmt, path::Path};
 
 mod parse;
 mod render;
 mod config;
 mod resources;
 mod content;
+mod project;
 
-pub use config::ConfigWarning;
+pub use config::{Config, DocOut, DocStyle};
+pub use project::{Project, ProjectWarning};
 pub use render::RenderWarning;
-pub use resources::ResourceWarning;
 pub use parse::common::RefKind;
 
-use crate::{config::{Config, DocOut, DocStyle}, content::Content, parse::rush::Rush, render::common::Backend, resources::Resources};
+use crate::{content::Content, parse::rush::Rush, render::common::Backend};
 use crate::render::html::{HtmlBackend, HtmlStyle, gost, gostlike::GostLike};
 use crate::parse::block_fragmentation::Counters;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Warning {
-    Project(ConfigWarning),
-    Resource(ResourceWarning),
+    Project(ProjectWarning),
     Render(RenderWarning),
 }
 
-impl From<ConfigWarning> for Warning {
-    fn from(w: ConfigWarning) -> Self {
+impl From<ProjectWarning> for Warning {
+    fn from(w: ProjectWarning) -> Self {
         Self::Project(w)
-    }
-}
-
-impl From<ResourceWarning> for Warning {
-    fn from(w: ResourceWarning) -> Self {
-        Self::Resource(w)
     }
 }
 
@@ -40,19 +34,20 @@ impl From<RenderWarning> for Warning {
     }
 }
 
-pub fn build(project_path: PathBuf) -> io::Result<Vec<Warning>> {
-    let (config, config_warns) = Config::load(&project_path);
-    let mut warns: Vec<Warning> = config_warns.into_iter().map(Warning::from).collect();
+#[derive(Debug, Clone, PartialEq)]
+pub struct OutFile {
+    pub path: String,
+    pub data: Vec<u8>,
+}
 
-    let (resources, resource_warns) = Resources::build_index(&config.input)?;
-    warns.extend(resource_warns.into_iter().map(Warning::from));
-    resources.copy_tree(&config.output)?;
-    println!("{resources:?}");
-    let (content, content_warns) = Content::resolve(&config.content, &resources);
-    warns.extend(content_warns.into_iter().map(Warning::from));
+pub fn build(config: &Config, project: &Project) -> Result<(Vec<OutFile>, Vec<Warning>), fmt::Error> {
+    let resources = &project.resources;
+    let (content, content_warns) = Content::resolve(&project.content, resources);
+    let mut warns: Vec<Warning> = content_warns.into_iter().map(Warning::from).collect();
+    let mut files = Vec::new();
     match config.out {
         DocOut::Html if config.style == DocStyle::Gost => {
-            let render_warns = build_gost(&config, &resources, &content)?;
+            let render_warns = build_gost(project, &content, &mut files);
             warns.extend(render_warns.into_iter().map(Warning::from));
         }
         DocOut::Html => {
@@ -63,44 +58,40 @@ pub fn build(project_path: PathBuf) -> io::Result<Vec<Warning>> {
                 }
             };
             let backend = HtmlBackend { style };
-            fs::create_dir_all(&config.output)?;
-            fs::write(config.output.join(style.css_name()), style.css())?;
-            for (id, src, local) in resources.files.iter() {
-                let text = fs::read_to_string(src)?;
-                let rush = Rush::new(&text, &resources);
-                let (html, render_warns) = backend.render(rush, &resources, id, &content).map_err(io::Error::other)?;
+            files.push(OutFile { path: style.css_name().to_string(), data: style.css().into() });
+            for (id, local, text) in resources.files.iter() {
+                let rush = Rush::new(text, resources);
+                let (html, render_warns) = backend.render(rush, resources, id, &content)?;
                 warns.extend(render_warns.into_iter().map(Warning::from));
-                fs::write(config.output.join(local).with_extension("html"), html)?;
+                files.push(OutFile { path: out_path(local.with_extension("html").as_path()), data: html.into_bytes() });
             }
         }
         _ => {
-            println!("not html!");
             unimplemented!("not yet")
         }
     }
-    Ok(warns)
+    Ok((files, warns))
 }
 
-fn build_gost(config: &Config, resources: &Resources, content: &Content) -> io::Result<Vec<RenderWarning>> {
-    fs::create_dir_all(&config.output)?;
-    fs::write(config.output.join(gost::CSS_NAME), gost::CSS)?;
-    let fonts = config.output.join(gost::FONTS_DIR);
-    fs::create_dir_all(&fonts)?;
+fn build_gost(project: &Project, content: &Content, files: &mut Vec<OutFile>) -> Vec<RenderWarning> {
+    let resources = &project.resources;
+    files.push(OutFile { path: gost::CSS_NAME.to_string(), data: gost::CSS.into() });
     for (name, data) in gost::metrics::FONT_FILES {
-        fs::write(fonts.join(name), data)?;
+        files.push(OutFile { path: format!("{}/{name}", gost::FONTS_DIR), data: data.to_vec() });
     }
 
-    let texts: Vec<String> = content.items.iter()
-        .map(|item| fs::read_to_string(resources.files.global_path(item.file)))
-        .collect::<io::Result<_>>()?;
     let mut counters = Counters::default();
-    let mut docs = Vec::with_capacity(texts.len());
-    for (item, text) in content.items.iter().zip(&texts) {
-        let rush = Rush::new_from(text, resources, counters);
+    let mut docs = Vec::with_capacity(content.items.len());
+    for item in &content.items {
+        let rush = Rush::new_from(resources.files.data(item.file), resources, counters);
         counters = rush.counters;
         docs.push(gost::Doc { file: item.file, name: &item.name, rush });
     }
     let (html, warns) = gost::render_project(docs, resources);
-    fs::write(config.output.join(gost::OUT_NAME), html)?;
-    Ok(warns)
+    files.push(OutFile { path: gost::OUT_NAME.to_string(), data: html.into_bytes() });
+    warns
+}
+
+fn out_path(local: &Path) -> String {
+    local.components().map(|c| c.as_os_str().to_string_lossy()).collect::<Vec<_>>().join("/")
 }

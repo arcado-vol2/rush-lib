@@ -1,5 +1,11 @@
-use crate::config::{ConfigWarning, ContentEntry};
+use crate::project::ProjectWarning;
 use crate::resources::{FileId, Id, Resources};
+
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct ContentEntry {
+    pub(crate) name: String,
+    pub(crate) key: String,
+}
 
 #[derive(Debug, PartialEq)]
 pub(crate) struct ContentItem {
@@ -14,19 +20,19 @@ pub(crate) struct Content {
 }
 
 impl Content {
-    pub(crate) fn resolve(entries: &[ContentEntry], res: &Resources) -> (Content, Vec<ConfigWarning>) {
+    pub(crate) fn resolve(entries: &[ContentEntry], res: &Resources) -> (Content, Vec<ProjectWarning>) {
         let mut warns = Vec::new();
         let mut items: Vec<ContentItem> = Vec::new();
         for entry in entries {
-            let Some(file) = res.get_file_id(&entry.path) else {
-                warns.push(ConfigWarning::UnknownContentPath(entry.path.clone()));
+            let Some(file) = res.get_file_id(&entry.key) else {
+                warns.push(ProjectWarning::UnknownContentPath(entry.key.clone()));
                 continue;
             };
             if items.iter().any(|i| i.file == file) {
-                warns.push(ConfigWarning::DuplicateContent(entry.path.clone()));
+                warns.push(ProjectWarning::DuplicateContent(entry.key.clone()));
                 continue;
             }
-            let depth = entry.path.split('/').filter(|s| !s.is_empty()).count();
+            let depth = entry.key.split('/').filter(|s| !s.is_empty()).count();
             items.push(ContentItem { name: entry.name.clone(), file, depth });
         }
         (Content { items }, warns)
@@ -40,36 +46,32 @@ impl Content {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::fs;
-
-    fn entry(name: &str, path: &str) -> ContentEntry {
-        ContentEntry { name: name.into(), path: path.into() }
-    }
+    use crate::project::Project;
 
     #[test]
     fn resolve_depth_and_warnings() {
-        let root = std::env::temp_dir().join("simple_ru_help_content_resolve");
-        let _ = fs::remove_dir_all(&root);
-        fs::create_dir_all(root.join("guide/deep")).unwrap();
-        fs::write(root.join("intro.rush"), "").unwrap();
-        fs::write(root.join("guide/install.rush"), "").unwrap();
-        fs::write(root.join("guide/deep/x.rush"), "").unwrap();
-        let (res, _) = Resources::build_index(&root).unwrap();
-        fs::remove_dir_all(&root).unwrap();
+        let mut project = Project::new();
+        for path in ["intro.rush", "guide/install.rush", "guide/deep/x.rush"] {
+            project.add_file(path, path, String::new()).unwrap();
+        }
+        for (name, key) in [
+            ("Введение", "intro"),
+            ("Установка", "guide/install.rush"),
+            ("Глубоко", "guide/deep/x"),
+            ("Нет", "missing"),
+            ("Повтор", "intro.rush"),
+        ] {
+            project.add_content(name.into(), key.into());
+        }
+        let res = &project.resources;
 
-        let (content, w) = Content::resolve(&[
-            entry("Введение", "intro"),
-            entry("Установка", "guide/install.rush"),
-            entry("Глубоко", "guide/deep/x"),
-            entry("Нет", "missing"),
-            entry("Повтор", "intro.rush"),
-        ], &res);
+        let (content, w) = Content::resolve(&project.content, res);
 
         let got: Vec<(&str, usize)> = content.items.iter().map(|i| (i.name.as_str(), i.depth)).collect();
         assert_eq!(got, vec![("Введение", 1), ("Установка", 2), ("Глубоко", 3)]);
         assert_eq!(w, vec![
-            ConfigWarning::UnknownContentPath("missing".into()),
-            ConfigWarning::DuplicateContent("intro.rush".into()),
+            ProjectWarning::UnknownContentPath("missing".into()),
+            ProjectWarning::DuplicateContent("intro.rush".into()),
         ]);
         let intro = res.get_file_id("intro").unwrap();
         assert_eq!(content.title_for(intro), Some("Введение"));
