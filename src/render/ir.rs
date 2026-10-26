@@ -654,7 +654,7 @@ pub(crate) mod tests {
         let mut p = Proj::new();
         p.add_file("doc", "doc.rush", src.to_string()).unwrap();
         let res = &p.resources;
-        let style = Style::of(DocStyle::Gost);
+        let style = Style::of(DocStyle::Gost7_32);
         let rush = Rush::new(res.files.data(Id::new(0)), res);
         let mut warn = Vec::new();
         let project = build(vec![Source { file: Id::new(0), title: "Документ", rush }], &style, res, &mut warn);

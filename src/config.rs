@@ -2,7 +2,7 @@
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub enum DocStyle {
     #[default]
-    Gost,
+    Gost7_32,
     Modern,
     Light,
 }

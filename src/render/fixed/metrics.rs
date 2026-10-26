@@ -40,7 +40,7 @@ mod tests {
 
     #[test]
     fn mono_is_fixed_and_serif_is_not() {
-        let m = Metrics::new(&Style::of(DocStyle::Gost).fonts);
+        let m = Metrics::new(&Style::of(DocStyle::Gost7_32).fonts);
         let mono = m.width("iiii", Font::MONO, 12.0);
         assert!((mono - m.width("WWWW", Font::MONO, 12.0)).abs() < 1e-3);
         assert!((mono - 4.0 * 0.6 * 12.0).abs() < 0.1, "{mono}");

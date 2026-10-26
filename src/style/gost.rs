@@ -37,7 +37,7 @@ pub(super) fn style() -> Style {
     let around = |space| Role { space_before: space, space_after: space, ..text };
 
     Style {
-        name: DocStyle::Gost,
+        name: DocStyle::Gost7_32,
         fonts: Fonts { body: SERIF, mono: MONO },
         page: Some(PageGeometry::A4),
         border: 0.75,

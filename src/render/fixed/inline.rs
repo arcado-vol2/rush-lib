@@ -340,7 +340,7 @@ mod tests {
 
     #[test]
     fn breaks_by_width_and_justifies_all_but_last() {
-        let style = Style::of(DocStyle::Gost);
+        let style = Style::of(DocStyle::Gost7_32);
         let m = Metrics::new(&style.fonts);
         let role = Role::text(14.0, 21.0);
         let one = m.width("слово", Font::default(), 14.0);
@@ -357,7 +357,7 @@ mod tests {
 
     #[test]
     fn long_word_is_cut_by_chars() {
-        let style = Style::of(DocStyle::Gost);
+        let style = Style::of(DocStyle::Gost7_32);
         let m = Metrics::new(&style.fonts);
         let role = Role::text(14.0, 21.0);
         let w = m.width("abcd", Font::default(), 14.0) + WIDTH_SAFETY + 0.1;
@@ -370,7 +370,7 @@ mod tests {
 
     #[test]
     fn indent_center_and_run_positions() {
-        let style = Style::of(DocStyle::Gost);
+        let style = Style::of(DocStyle::Gost7_32);
         let m = Metrics::new(&style.fonts);
         let role = Role::text(14.0, 21.0);
         let mut i = Inline::new(&m, &role, 0.7);

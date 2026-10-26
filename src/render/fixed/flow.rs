@@ -611,7 +611,7 @@ mod tests {
     fn flow_of(src: &str) -> (Flow, Vec<RenderWarning>) {
         let (proj, project, mut out) = project_of(src);
         let res = &proj.resources;
-        let style = Style::of(crate::config::DocStyle::Gost);
+        let style = Style::of(crate::config::DocStyle::Gost7_32);
         let ctx = Ctx::new(&style, style.page.unwrap(), res, &project);
         let mut warn = Warn { out: &mut out, backend: DocOut::HtmlPaged };
         let flow = build(&project, &ctx, &mut warn);

@@ -255,7 +255,7 @@ pub(crate) struct Style {
 impl Style {
     pub(crate) fn of(name: DocStyle) -> Style {
         match name {
-            DocStyle::Gost => gost::style(),
+            DocStyle::Gost7_32 => gost::style(),
             _ => unimplemented!("not yet"),
         }
     }
@@ -283,7 +283,7 @@ mod tests {
 
     #[test]
     fn font_file_by_face() {
-        let f = Style::of(DocStyle::Gost).fonts;
+        let f = Style::of(DocStyle::Gost7_32).fonts;
         assert_eq!(f.file(Font { bold: true, ..Font::MONO }).0, "LiberationMono-Bold.ttf");
         assert_eq!(f.file(Font::ITALIC).0, "LiberationSerif-Italic.ttf");
         assert_eq!(f.all().count(), 8);

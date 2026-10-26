@@ -181,9 +181,9 @@ mod tests {
     #[test]
     fn same_style_two_backends() {
         let (p, content) = project();
-        let html = build(&Config { style: DocStyle::Gost, out: DocOut::Html }, &p, &content).unwrap();
+        let html = build(&Config { style: DocStyle::Gost7_32, out: DocOut::Html }, &p, &content).unwrap();
         assert_eq!(paths(&html.0), vec!["style.css", "a.html"]);
-        let paged = build(&Config { style: DocStyle::Gost, out: DocOut::HtmlPaged }, &p, &content).unwrap();
+        let paged = build(&Config { style: DocStyle::Gost7_32, out: DocOut::HtmlPaged }, &p, &content).unwrap();
         assert_eq!(paths(&paged.0), vec!["style.css", "index.html"]);
         assert!(html.1.is_empty() && paged.1.is_empty(), "{:?} {:?}", html.1, paged.1);
 
@@ -195,9 +195,9 @@ mod tests {
 
     #[test]
     fn style_without_pages_warns() {
-        let style = Style { page: None, ..Style::of(DocStyle::Gost) };
+        let style = Style { page: None, ..Style::of(DocStyle::Gost7_32) };
         let mut warn = Vec::new();
         assert_eq!(geometry(&style, &mut warn).width, PageGeometry::A4.width);
-        assert_eq!(warn, vec![RenderWarning { origin: Origin::Style(DocStyle::Gost), file: None, kind: RenderWarningKind::Unsupported(Feature::Paging) }]);
+        assert_eq!(warn, vec![RenderWarning { origin: Origin::Style(DocStyle::Gost7_32), file: None, kind: RenderWarningKind::Unsupported(Feature::Paging) }]);
     }
 }
