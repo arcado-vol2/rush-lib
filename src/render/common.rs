@@ -12,10 +12,8 @@ pub enum RenderWarning {
     UnresolvedImage(String),
     InvalidUrl(String),
     InvalidFormula(String),
-    /// link to a file missing from [[content]]: it has no target in the joined document
     FileNotInContent(String),
     ImageSizeUnknown(String),
-    /// unbreakable block taller than a page: placed on its own page and overflows the margin
     BlockTallerThanPage,
 }
 
