@@ -1,5 +1,4 @@
-use super::{Block, Kind, NOTE_SEP, SLACK, TEXT_H};
-use crate::render::common::RenderWarning;
+use super::{Block, Kind};
 use std::collections::HashSet;
 
 #[derive(Debug, Clone, PartialEq)]
@@ -16,12 +15,20 @@ pub(crate) struct PageOut {
     pub(crate) notes: Vec<u16>,
 }
 
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct Room {
+    /// text area height minus the reserve
+    pub(crate) height: f32,
+    pub(crate) note_sep: f32,
+}
+
 struct State<'n> {
     pages: Vec<PageOut>,
     used: f32,
     notes_h: f32,
     content: bool,
     placed: HashSet<u16>,
+    room: Room,
     note_h: &'n dyn Fn(u16) -> f32,
 }
 
@@ -34,7 +41,7 @@ impl State<'_> {
     }
 
     fn avail(&self) -> f32 {
-        TEXT_H - SLACK - self.used - self.notes_h
+        self.room.height - self.used - self.notes_h
     }
 
     fn extra(&self, notes: &[u16], pending: &[u16]) -> f32 {
@@ -45,7 +52,7 @@ impl State<'_> {
                 continue;
             }
             if self.pages.last().unwrap().notes.is_empty() && pending.is_empty() && seen.is_empty() {
-                h += NOTE_SEP;
+                h += self.room.note_sep;
             }
             seen.push(g);
             h += (self.note_h)(g);
@@ -57,7 +64,7 @@ impl State<'_> {
         for &g in notes {
             if self.placed.insert(g) {
                 if self.pages.last().unwrap().notes.is_empty() {
-                    self.notes_h += NOTE_SEP;
+                    self.notes_h += self.room.note_sep;
                 }
                 self.notes_h += (self.note_h)(g);
                 self.pages.last_mut().unwrap().notes.push(g);
@@ -76,8 +83,10 @@ fn lead(blocks: &[Block], j: usize) -> f32 {
     if b.keep_with_next && n == b.pieces.len() { own + lead(blocks, j + 1) } else { own }
 }
 
-pub(crate) fn paginate(blocks: &[Block], note_h: &dyn Fn(u16) -> f32, warn: &mut Vec<RenderWarning>) -> Vec<PageOut> {
-    let mut st = State { pages: vec![PageOut::default()], used: 0.0, notes_h: 0.0, content: false, placed: HashSet::new(), note_h };
+/// Lays blocks out on pages; second - blocks taller than a page
+pub(crate) fn paginate(blocks: &[Block], room: Room, note_h: &dyn Fn(u16) -> f32) -> (Vec<PageOut>, Vec<usize>) {
+    let mut st = State { pages: vec![PageOut::default()], used: 0.0, notes_h: 0.0, content: false, placed: HashSet::new(), room, note_h };
+    let mut too_tall = Vec::new();
 
     for (i, b) in blocks.iter().enumerate() {
         if b.break_before && st.content {
@@ -120,7 +129,7 @@ pub(crate) fn paginate(blocks: &[Block], note_h: &dyn Fn(u16) -> f32, warn: &mut
                         continue;
                     }
                     if b.min_first >= n {
-                        warn.push(RenderWarning::BlockTallerThanPage);
+                        too_tall.push(i);
                         end = n;
                     } else {
                         end = k.max(start + 1);
@@ -149,36 +158,40 @@ pub(crate) fn paginate(blocks: &[Block], note_h: &dyn Fn(u16) -> f32, warn: &mut
             st.new_page();
         }
     }
-    st.pages
+    (st.pages, too_tall)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use super::super::{Piece, LH};
+    use super::super::Piece;
+
+    const LH: f32 = 21.0;
+    const ROOM: Room = Room { height: 700.0, note_sep: 10.0 };
+
+    fn piece(height: f32) -> Piece {
+        Piece { items: Vec::new(), height, notes: vec![] }
+    }
 
     fn text(lines: usize) -> Block {
         Block {
-            pieces: (0..lines).map(|_| Piece { html: String::new(), height: LH, notes: vec![] }).collect(),
+            pieces: (0..lines).map(|_| piece(LH)).collect(),
             min_first: 2,
             min_last: 2,
-            ..Block::new(Kind::Text { open: "<p>".into(), close: "</p>" })
+            ..Block::new(Kind::Text)
         }
     }
 
     fn whole(height: f32) -> Block {
-        Block {
-            pieces: vec![Piece { html: String::new(), height, notes: vec![] }],
-            ..Block::new(Kind::Whole)
-        }
+        Block { pieces: vec![piece(height)], ..Block::new(Kind::Whole) }
     }
 
     fn per_page() -> usize {
-        ((TEXT_H - SLACK) / LH) as usize
+        (ROOM.height / LH) as usize
     }
 
     fn run(blocks: &[Block]) -> Vec<PageOut> {
-        paginate(blocks, &|_| LH, &mut Vec::new())
+        paginate(blocks, ROOM, &|_| LH).0
     }
 
     fn shape(pages: &[PageOut]) -> Vec<Vec<(usize, usize, usize)>> {
@@ -214,7 +227,7 @@ mod tests {
         let n = per_page();
         let mut b = text(n);
         b.pieces[n - 3].notes = vec![1];
-        let pages = paginate(&[b], &|_| LH * 3.0, &mut Vec::new());
+        let (pages, _) = paginate(&[b], ROOM, &|_| LH * 3.0);
         assert_eq!(pages[0].notes, Vec::<u16>::new());
         assert_eq!(pages[1].notes, vec![1]);
         assert_eq!(shape(&pages)[0], vec![(0, 0, n - 3)]);
@@ -222,10 +235,9 @@ mod tests {
 
     #[test]
     fn break_before_and_too_tall() {
-        let mut warn = Vec::new();
         let doc = Block { break_before: true, ..text(2) };
-        let pages = paginate(&[text(2), doc, whole(TEXT_H * 2.0)], &|_| LH, &mut warn);
+        let (pages, tall) = paginate(&[text(2), doc, whole(ROOM.height * 2.0)], ROOM, &|_| LH);
         assert_eq!(shape(&pages), vec![vec![(0, 0, 2)], vec![(1, 0, 2)], vec![(2, 0, 1)]]);
-        assert_eq!(warn, vec![RenderWarning::BlockTallerThanPage]);
+        assert_eq!(tall, vec![2]);
     }
 }

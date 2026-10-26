@@ -1,16 +1,18 @@
+/// Document styling, independent of the output format
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub enum DocStyle {
     #[default]
-    GostLike,
     Gost,
     Modern,
     Light,
 }
 
+/// Output format: semantic (`Html`, `Markdown`) or paged (`HtmlPaged`, `Pdf`)
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub enum DocOut {
     #[default]
     Html,
+    HtmlPaged,
     Markdown,
     Pdf,
     Odt,
