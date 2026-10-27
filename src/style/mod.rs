@@ -36,9 +36,7 @@ pub(crate) type FontFile = (&'static str, &'static [u8]);
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct FontFamily {
     pub(crate) name: &'static str,
-    /// fallback families if the files are unavailable
     pub(crate) fallback: &'static str,
-    /// regular, italic, bold, bold italic
     pub(crate) files: [FontFile; 4],
 }
 

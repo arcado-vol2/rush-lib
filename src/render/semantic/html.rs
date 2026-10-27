@@ -23,7 +23,6 @@ fn align_name(a: Align) -> &'static str {
     }
 }
 
-/// CSS rule from a style role; `indent` - first line indent expression, if it is not constant
 fn role_rule(out: &mut String, selector: &str, role: &Role, indent: Option<String>) {
     let family = if role.font.mono { "var(--mono)" } else { "var(--body)" };
     let first = indent.unwrap_or_else(|| format!("{}pt", role.first - role.rest));
