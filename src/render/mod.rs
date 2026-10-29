@@ -11,7 +11,6 @@ use std::path::Path;
 
 pub(crate) mod fixed;
 pub(crate) mod ir;
-pub(crate) mod markdown;
 pub(crate) mod semantic;
 mod warning;
 

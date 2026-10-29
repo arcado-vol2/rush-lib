@@ -363,9 +363,6 @@ fn resolve_name<'a>(name_line: &'a str) -> Option<&'a str> {
 
 
 
-pub(crate) fn split_blocks<'a>(source: &'a str) -> FlatLexedProject<'a> {
-    split_blocks_from(source, Counters::default()).0
-}
 
 /// `start` - counters to continue numbering from; the final counters are returned second
 pub(crate) fn split_blocks_from<'a>(source: &'a str, start: Counters) -> (FlatLexedProject<'a>, Counters) {
@@ -573,7 +570,10 @@ pub(crate) fn split_blocks_from<'a>(source: &'a str, start: Counters) -> (FlatLe
 #[cfg(test)] mod test {
     use std::{borrow::Cow, collections::HashSet, vec};
 
-use crate::parse::{common::*, block_fragmentation::{FlatLexedProject, InnerProjectLinks, Block, BlockKind::{self, Header}, HeaderCounter, ImageKind, Named, NamedLinkable, split_blocks}};
+use crate::parse::{common::*, block_fragmentation::{FlatLexedProject, InnerProjectLinks, Block, BlockKind::{self, Header}, HeaderCounter, ImageKind, Named, NamedLinkable, split_blocks_from, Counters}};
+    fn split_blocks<'a>(source: &'a str) -> FlatLexedProject<'a> {
+        split_blocks_from(source, Counters::default()).0
+    }
 
     fn project<'a>(blocks: Vec<Block<'a>>) -> FlatLexedProject<'a> {
         FlatLexedProject { blocks, ..Default::default() }

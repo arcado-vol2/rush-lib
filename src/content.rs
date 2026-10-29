@@ -4,6 +4,7 @@ use crate::resources::{FileId, Id, Resources};
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct ContentEntry {
     pub(crate) name: String,
+    /// path, normalized the same way as in rush files
     pub(crate) key: String,
 }
 

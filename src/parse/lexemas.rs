@@ -1,6 +1,5 @@
 pub(crate) const MARK: char = '\\';
 pub(crate) const TAB: char = '\t';
-pub(crate) const CR: char = '\r';
 pub(crate) const SPACE: char = ' ';
 pub(crate) const HEADER: char = '+';
 pub(crate) const BULLET_LIST: char = '.';
@@ -28,18 +27,13 @@ pub(crate) const TABLE_RIGHT: char = 'П';
 pub(crate) const TABLE_SEP: char = '/';
 pub(crate) const TABLE_MERGE_LEFT: char = '+';
 pub(crate) const TABLE_MERGE_UP: char = '=';
-pub(crate) const NEW_LINE: char = '\n';
 pub(crate) const SHIELD: char = '_'; 
 pub(crate) const QUOTES: char = '"'; 
 pub(crate) const SMALL_YO: char = 'ё';
-pub(crate) const BIG_YO: char = 'Ё';
 pub(crate) const SMALL_E: char = 'е';
-pub(crate) const BIG_E: char = 'Е';
-pub(crate) const EXT_DIV: char = '.';
 pub(crate) const DASH: char = '-';
 
 
-pub(crate) const BYTE_SHIELD: u8 = b'_';
 
 pub(crate) fn is_blank(c: char) -> bool{
     matches!(c, SPACE | TAB)
@@ -102,11 +96,7 @@ pub(crate) const TABLE_MERGE_LEFT_TAG: Tag<2> = Tag::seq([MARK, TABLE_MERGE_LEFT
 /// `\=`
 pub(crate) const TABLE_MERGE_UP_TAG: Tag<2> = Tag::seq([MARK, TABLE_MERGE_UP]);
 
-/// `--`
-pub(crate) const LONG_DASH: Tag<2> = Tag::repeat(DASH);
 
-
-pub(crate) const NEW_LINE_BREAK: usize = 2;
 pub(crate) const TAB_WIDTH: u16 = 4;
 
 pub(crate) const FORMULA_REF: char = 'ф';

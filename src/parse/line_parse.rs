@@ -135,9 +135,7 @@ enum InlineClearKind {
     Mono,
     Braced(u32),
 }
-pub(crate) fn clear_name_attribute<'a>(line: &'a str) -> Cow<'a, str> {
-    clear_name_attribute_in(line, InlineContext::Text)
-}
+
 
 fn collapse_blanks<'a>(line: Cow<'a, str>) -> Cow<'a, str> {
     let is_collapsed = !line.contains(TAB)
@@ -290,28 +288,6 @@ pub(crate) fn parse_note_line(line: &str) -> Option<(u16, &str)> {
     num.parse::<u16>().ok().map(|n| (n, text))
 }
 
-pub(crate) fn clear_name_link<'a>(line: &'a str) -> Cow<'a, str> {
-    let Some(first) = line.bytes().position(|b| b == BYTE_SHIELD) else {
-        return Cow::Borrowed(line);
-    };
-    let mut out = String::with_capacity(line.len());
-    out.push_str(&line[..first]);
-    
-    let mut chars = line[first..].chars();
-    while let Some(ch) = chars.next() {
-        match ch {
-            SHIELD => {
-                if let Some(next) = chars.next() && next == RBRACE {
-                    out.push(next);
-                }
-            }
-            _ => {
-                out.push(ch);
-            }
-        }
-    }
-    return Cow::Owned(out);
-}
 
 
 
@@ -729,10 +705,14 @@ pub(crate) fn generate_pre_spans<'a>(preparsed: PreparsedLines<'a>) -> Vec<PreSp
 
 
 #[cfg(test)] mod test {
+    
     use std::{borrow::Cow, vec};
 
     use crate::parse::line_parse::*;
 
+    fn clear_name_attribute<'a>(line: &'a str) -> Cow<'a, str> {
+        clear_name_attribute_in(line, InlineContext::Text)
+    }
 
     fn check(input: &str, expected: &str) {
         assert_eq!(clear_name_attribute(input), expected);
@@ -1247,16 +1227,6 @@ pub(crate) fn generate_pre_spans<'a>(preparsed: PreparsedLines<'a>) -> Vec<PreSp
         ] {
             assert_eq!(clear_name_attribute(formatted), plain, "вход: {formatted:?}");
         }
-    }
-
-    #[test]
-    fn check_line_clear_name_link(){
-        assert_eq!(clear_name_link("aa"), "aa");
-    }
-
-    #[test]
-    fn check_line_clear_name_link_shield_rbrace(){
-        assert_eq!(clear_name_link("(a_)a"), "(a)a");
     }
 
     #[test]

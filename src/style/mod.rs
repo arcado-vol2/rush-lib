@@ -2,6 +2,7 @@ use crate::config::DocStyle;
 use crate::render::Feature;
 
 mod gost;
+mod modern;
 
 pub(crate) const MM: f32 = 72.0 / 25.4;
 
@@ -254,6 +255,7 @@ impl Style {
     pub(crate) fn of(name: DocStyle) -> Style {
         match name {
             DocStyle::Gost7_32 => gost::style(),
+            DocStyle::Modern => modern::style(),
             _ => unimplemented!("not yet"),
         }
     }

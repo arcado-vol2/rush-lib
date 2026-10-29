@@ -3,6 +3,7 @@ use percent_encoding::{AsciiSet, CONTROLS, utf8_percent_encode};
 
 const EXT_DIV: char = '.';
 
+/// Symbols that are percent-encoded to keep the href valid
 const PATH_SEGMENT: &AsciiSet = &CONTROLS
     .add(b' ').add(b'"').add(b'#').add(b'<').add(b'>').add(b'?').add(b'`')
     .add(b'{').add(b'}').add(b'%').add(b'/').add(b'\\').add(b'[').add(b']').add(b'^').add(b'|');
@@ -135,9 +136,9 @@ impl Resources {
         relative_path(from_dir, target)
     }
 
-    pub(crate) fn root_href(&self, from: Id<FileId>, target: &str) -> String {
+    pub(crate) fn root_href(&self, from: Id<FileId>, to: &str) -> String {
         let from_dir = self.files.local_path(from).parent().unwrap();
-        relative_path(from_dir, Path::new(target))
+        relative_path(from_dir, Path::new(to))
     }
 
     /// Resource path relative to the output root
