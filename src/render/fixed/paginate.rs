@@ -79,7 +79,8 @@ fn lead(blocks: &[Block], j: usize) -> f32 {
         return 0.0;
     }
     let n = b.min_first.min(b.pieces.len());
-    let own = b.space_before + b.head(true) + b.pieces[..n].iter().map(|p| p.height).sum::<f32>();
+    let tail = if n == b.pieces.len() { b.tail() } else { 0.0 };
+    let own = b.space_before + b.head(true) + b.pieces[..n].iter().map(|p| p.height).sum::<f32>() + tail;
     if b.keep_with_next && n == b.pieces.len() { own + lead(blocks, j + 1) } else { own }
 }
 
@@ -106,7 +107,8 @@ pub(crate) fn paginate(blocks: &[Block], room: Room, note_h: &dyn Fn(u16) -> f32
             while k < n {
                 let piece = &b.pieces[k];
                 let add = st.extra(&piece.notes, &pending);
-                if h + piece.height + notes_h + add > st.avail() {
+                let tail = if k + 1 == n { b.tail() } else { 0.0 };
+                if h + piece.height + tail + notes_h + add > st.avail() {
                     break;
                 }
                 h += piece.height;
@@ -135,7 +137,7 @@ pub(crate) fn paginate(blocks: &[Block], room: Room, note_h: &dyn Fn(u16) -> f32
                         end = k.max(start + 1);
                     }
                 }
-            } else if b.keep_with_next && !top && h + notes_h + lead(blocks, i + 1) > st.avail() {
+            } else if b.keep_with_next && !top && h + b.tail() + notes_h + lead(blocks, i + 1) > st.avail() {
                 st.new_page();
                 continue;
             }
@@ -151,7 +153,7 @@ pub(crate) fn paginate(blocks: &[Block], room: Room, note_h: &dyn Fn(u16) -> f32
                 st.content = true;
             }
             if end == n {
-                st.used += b.space_after;
+                st.used += b.tail() + b.space_after;
                 break;
             }
             start = end;

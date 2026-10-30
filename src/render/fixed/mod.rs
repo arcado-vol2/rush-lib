@@ -1,7 +1,7 @@
-use crate::parse::common::Color;
+use crate::color::Color;
 use crate::render::ir;
 use crate::resources::Resources;
-use crate::style::{Font, PageGeometry, Style};
+use crate::style::{Align, Font, PageGeometry, Style};
 use std::collections::HashMap;
 
 pub(crate) mod flow;
@@ -12,12 +12,10 @@ mod toc;
 
 pub(crate) mod html_paged;
 
-/// Reserve for the collapsed table border
 const TABLE_CLOSE: f32 = 1.0;
 
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct PlacedRun {
-    /// from the line start
     pub(crate) x: f32,
     pub(crate) text: String,
     pub(crate) font: Font,
@@ -26,19 +24,17 @@ pub(crate) struct PlacedRun {
     pub(crate) under: bool,
     pub(crate) strike: bool,
     pub(crate) color: Option<Color>,
+    pub(crate) bg: Option<Color>,
     pub(crate) link: Option<String>,
     pub(crate) error: bool,
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct LineBox {
-    /// text start, including indent and alignment
     pub(crate) x: f32,
     pub(crate) size: f32,
     pub(crate) lh: f32,
-    /// extra width of each space when justified
     pub(crate) word_spacing: f32,
-    /// text width without the extra spacing
     pub(crate) natural: f32,
     pub(crate) runs: Vec<PlacedRun>,
     pub(crate) notes: Vec<u16>,
@@ -50,13 +46,11 @@ impl LineBox {
     }
 }
 
-/// Coordinates in pt from the top left corner of the text area
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) enum Item {
     Line { y: f32, line: LineBox },
-    /// filled rectangle: border and separator lines
     Rule { x: f32, y: f32, w: f32, h: f32 },
-    /// table of contents leader; `y` - the dot line
+    Fill { x: f32, y: f32, w: f32, h: f32, color: Color },
     Leader { x: f32, y: f32, w: f32 },
     Image { x: f32, y: f32, w: f32, h: f32, src: String },
     Math { x: f32, y: f32, w: f32, h: f32, size: f32, mathml: String },
@@ -70,7 +64,7 @@ impl Item {
                 line.x += dx;
                 *y += dy;
             }
-            Item::Rule { x, y, .. } | Item::Leader { x, y, .. } | Item::Image { x, y, .. } | Item::Math { x, y, .. } => {
+            Item::Rule { x, y, .. } | Item::Fill { x, y, .. } | Item::Leader { x, y, .. } | Item::Image { x, y, .. } | Item::Math { x, y, .. } => {
                 *x += dx;
                 *y += dy;
             }
@@ -86,10 +80,8 @@ fn shifted(items: &[Item], dx: f32, dy: f32, out: &mut Vec<Item>) {
     }));
 }
 
-/// Unbreakable piece of a block with known height
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct Piece {
-    /// relative to the piece top
     pub(crate) items: Vec<Item>,
     pub(crate) height: f32,
     pub(crate) notes: Vec<u16>,
@@ -98,8 +90,8 @@ pub(crate) struct Piece {
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) enum Kind {
     Text,
-    Table { caption: Vec<Item>, caption_h: f32, cont: Vec<Item>, cont_h: f32, head: Vec<Item>, head_h: f32, width: f32, border: f32 },
-    Code { caption: Vec<Item>, caption_h: f32, width: f32, border: f32, pad_x: f32, pad_y: f32 },
+    Table { caption: Vec<Item>, caption_h: f32, caption_after: bool, cont: Vec<Item>, cont_h: f32, head: Vec<Item>, head_h: f32, width: f32, border: f32, frame: bool, head_sep: bool },
+    Code { caption: Vec<Item>, caption_h: f32, caption_after: bool, width: f32, border: f32, pad_y: f32, divider: Option<f32> },
     Whole,
     Anchor,
 }
@@ -110,6 +102,10 @@ pub(crate) struct Block {
     pub(crate) pieces: Vec<Piece>,
     pub(crate) space_before: f32,
     pub(crate) space_after: f32,
+    pub(crate) indent: f32,
+    pub(crate) pad_y: f32,
+    pub(crate) bg: Option<Color>,
+    pub(crate) width: f32,
     pub(crate) keep_with_next: bool,
     pub(crate) break_before: bool,
     pub(crate) min_first: usize,
@@ -125,6 +121,10 @@ impl Block {
             pieces: Vec::new(),
             space_before: 0.0,
             space_after: 0.0,
+            indent: 0.0,
+            pad_y: 0.0,
+            bg: None,
+            width: 0.0,
             keep_with_next: false,
             break_before: false,
             min_first: usize::MAX,
@@ -135,16 +135,30 @@ impl Block {
     }
 
     pub(crate) fn head(&self, first: bool) -> f32 {
-        match &self.kind {
-            Kind::Table { caption_h, cont_h, head_h, .. } => {
-                (if first { *caption_h } else { *cont_h }) + head_h + TABLE_CLOSE
+        let pad = if first { self.pad_y } else { 0.0 };
+        pad + match &self.kind {
+            Kind::Table { caption_h, caption_after, cont_h, head_h, .. } => {
+                let cap = match (first, caption_after) {
+                    (true, false) => *caption_h,
+                    (true, true) => 0.0,
+                    (false, _) => *cont_h,
+                };
+                cap + head_h + TABLE_CLOSE
             }
-            Kind::Code { caption_h, border, pad_y, .. } => (if first { *caption_h } else { 0.0 }) + 2.0 * (pad_y + border),
+            Kind::Code { caption_h, caption_after, border, pad_y, .. } => {
+                (if first && !caption_after { *caption_h } else { 0.0 }) + 2.0 * (pad_y + border)
+            }
             _ => 0.0,
         }
     }
 
-    /// Puts pieces `from..to` on the page starting at `y`, moves `y` past the block
+    pub(crate) fn tail(&self) -> f32 {
+        self.pad_y + match &self.kind {
+            Kind::Table { caption_h, caption_after: true, .. } | Kind::Code { caption_h, caption_after: true, .. } => *caption_h,
+            _ => 0.0,
+        }
+    }
+
     fn place(&self, from: usize, to: usize, top: bool, y: &mut f32, out: &mut Vec<Item>) {
         if matches!(self.kind, Kind::Anchor) {
             return;
@@ -157,6 +171,11 @@ impl Block {
         if first && let Some(id) = &self.id {
             out.push(Item::Anchor { y: *y, id: id.clone() });
         }
+        let mark = out.len();
+        let fill_top = *y;
+        if first {
+            *y += self.pad_y;
+        }
         let pieces = &self.pieces[from..to];
         let stack = |y: &mut f32, dx: f32, out: &mut Vec<Item>| {
             for p in pieces {
@@ -166,34 +185,67 @@ impl Block {
         };
         match &self.kind {
             Kind::Text | Kind::Whole => stack(y, 0.0, out),
-            Kind::Table { caption, caption_h, cont, cont_h, head, head_h, width, border } => {
-                let (cap, cap_h) = if first { (caption, caption_h) } else { (cont, cont_h) };
-                shifted(cap, 0.0, *y, out);
-                *y += cap_h;
+            Kind::Table { caption, caption_h, caption_after, cont, cont_h, head, head_h, width, border, frame, head_sep } => {
+                if !first {
+                    shifted(cont, 0.0, *y, out);
+                    *y += cont_h;
+                } else if !caption_after {
+                    shifted(caption, 0.0, *y, out);
+                    *y += caption_h;
+                }
                 let rule = |y: f32| Item::Rule { x: -border / 2.0, y: y - border / 2.0, w: width + border, h: *border };
-                out.push(rule(*y));
+                if *frame {
+                    out.push(rule(*y));
+                }
                 shifted(head, 0.0, *y, out);
                 *y += head_h;
+                if !first && *head_h > 0.0 && *head_sep {
+                    out.push(rule(*y));
+                }
                 stack(y, 0.0, out);
-                out.push(rule(*y));
+                if *frame {
+                    out.push(rule(*y));
+                }
                 *y += TABLE_CLOSE;
+                if last && *caption_after {
+                    shifted(caption, 0.0, *y, out);
+                    *y += caption_h;
+                }
             }
-            Kind::Code { caption, caption_h, width, border, pad_x, pad_y } => {
-                if first {
+            Kind::Code { caption, caption_h, caption_after, width, border, pad_y, divider } => {
+                if first && !caption_after {
                     shifted(caption, 0.0, *y, out);
                     *y += caption_h;
                 }
                 let top_y = *y;
                 *y += border + pad_y;
-                stack(y, border + pad_x, out);
+                stack(y, 0.0, out);
                 *y += pad_y + border;
                 let h = *y - top_y;
-                out.push(Item::Rule { x: 0.0, y: top_y, w: *width, h: *border });
-                out.push(Item::Rule { x: 0.0, y: *y - border, w: *width, h: *border });
-                out.push(Item::Rule { x: 0.0, y: top_y, w: *border, h });
-                out.push(Item::Rule { x: width - border, y: top_y, w: *border, h });
+                if *border > 0.0 {
+                    out.push(Item::Rule { x: 0.0, y: top_y, w: *width, h: *border });
+                    out.push(Item::Rule { x: 0.0, y: *y - border, w: *width, h: *border });
+                    out.push(Item::Rule { x: 0.0, y: top_y, w: *border, h });
+                    out.push(Item::Rule { x: width - border, y: top_y, w: *border, h });
+                }
+                if let Some(x) = divider {
+                    out.push(Item::Rule { x: *x, y: top_y, w: *border, h });
+                }
+                if last && *caption_after {
+                    shifted(caption, 0.0, *y, out);
+                    *y += caption_h;
+                }
             }
             Kind::Anchor => (),
+        }
+        if last {
+            *y += self.pad_y;
+        }
+        for item in &mut out[mark..] {
+            item.shift(self.indent, 0.0);
+        }
+        if let Some(color) = self.bg {
+            out.insert(mark, Item::Fill { x: 0.0, y: fill_top, w: self.width, h: *y - fill_top, color });
         }
         if last {
             *y += self.space_after;
@@ -224,10 +276,19 @@ fn pages(blocks: &[Block], layout: &[paginate::PageOut], first_num: usize, notes
         }
         if !page.notes.is_empty() {
             let bodies: Vec<&flow::NoteBody> = page.notes.iter().filter_map(|&n| notes.get(n as usize - 1)).collect();
-            let total = st.notes.sep + bodies.iter().map(|b| b.height).sum::<f32>();
-            let mut y = g.text_h() - total;
-            items.push(Item::Rule { x: 0.0, y: y + st.notes.rule_top, w: st.notes.rule_w, h: st.border });
-            y += st.notes.sep;
+            let n = &st.notes;
+            let total = note_sep(st) + bodies.iter().map(|b| b.height).sum::<f32>();
+            let mut y = g.text_h() - total + n.role.marg_before;
+            if n.rule {
+                items.push(Item::Rule { x: 0.0, y: y + n.rule_top, w: n.rule_w, h: st.border });
+            }
+            y += n.sep;
+            let pad = n.role.squeeze_y();
+            let body_h: f32 = bodies.iter().map(|b| b.height).sum();
+            if let Some(color) = n.role.bg_color {
+                items.push(Item::Fill { x: 0.0, y, w: g.text_w(), h: body_h + 2.0 * pad, color });
+            }
+            y += pad;
             for b in bodies {
                 shifted(&b.items, 0.0, y, &mut items);
                 y += b.height;
@@ -237,11 +298,20 @@ fn pages(blocks: &[Block], layout: &[paginate::PageOut], first_num: usize, notes
         if g.numbers {
             let lh = st.body.lh;
             let mut line = ctx.single(&number.to_string(), &st.body);
-            line.x = (g.text_w() - line.natural) / 2.0;
+            line.x = match g.number_align {
+                Align::Center => (g.text_w() - line.natural) / 2.0,
+                Align::Right => g.text_w() - line.natural,
+                Align::Left | Align::Justify => 0.0,
+            };
             items.push(Item::Line { y: g.text_h() + g.bottom / 2.0 - lh / 2.0, line });
         }
         Page { number, items }
     }).collect()
+}
+
+fn note_sep(style: &Style) -> f32 {
+    let role = &style.notes.role;
+    role.marg_before + style.notes.sep + 2.0 * role.squeeze_y() + role.marg_after
 }
 
 fn page_of_ids(blocks: &[Block], layout: &[paginate::PageOut], first_num: usize) -> HashMap<String, usize> {
@@ -256,12 +326,11 @@ fn page_of_ids(blocks: &[Block], layout: &[paginate::PageOut], first_num: usize)
     map
 }
 
-/// Pages of all project documents: table of contents, then text
 pub(crate) fn layout(project: &ir::Project, style: &Style, geometry: PageGeometry, res: &Resources, warn: &mut flow::Warn) -> Layout {
     let ctx = flow::Ctx::new(style, geometry, res, project);
     let flow = flow::build(project, &ctx, warn);
     let note_h = |g: u16| flow.notes.get(g as usize - 1).map_or(0.0, |n| n.height);
-    let room = paginate::Room { height: geometry.text_h() - geometry.slack, note_sep: style.notes.sep };
+    let room = paginate::Room { height: geometry.text_h() - geometry.slack, note_sep: note_sep(style) };
 
     let mut toc_pages = 0;
     let mut toc_out = Vec::new();

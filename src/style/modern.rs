@@ -18,13 +18,13 @@ const SANS_SERIF: FontFamily = FontFamily {
 };
 
 const MONO: FontFamily = FontFamily {
-    name: "GostMono",
-    fallback: "\"Courier New\", monospace",
+    name: "ModernJetBrainsMono",
+    fallback: "\"Consolas\", \"Courier New\", monospace",
     files: [
-        ("LiberationMono-Regular.ttf", include_bytes!("../templates/fonts/LiberationMono-Regular.ttf")),
-        ("LiberationMono-Italic.ttf", include_bytes!("../templates/fonts/LiberationMono-Italic.ttf")),
-        ("LiberationMono-Bold.ttf", include_bytes!("../templates/fonts/LiberationMono-Bold.ttf")),
-        ("LiberationMono-BoldItalic.ttf", include_bytes!("../templates/fonts/LiberationMono-BoldItalic.ttf")),
+        ("JetBrainsMono-Regular.ttf", include_bytes!("../templates/fonts/JetBrainsMono-Regular.ttf")),
+        ("JetBrainsMono-Italic.ttf", include_bytes!("../templates/fonts/JetBrainsMono-Italic.ttf")),
+        ("JetBrainsMono-Bold.ttf", include_bytes!("../templates/fonts/JetBrainsMono-Bold.ttf")),
+        ("JetBrainsMono-BoldItalic.ttf", include_bytes!("../templates/fonts/JetBrainsMono-BoldItalic.ttf")),
     ],
 };
 
@@ -33,54 +33,65 @@ pub(super) fn style() -> Style {
     let text = Role::text(SIZE, LH);
     let paragraph = Role {first: INDENT, align: Align::Left, min_first: 2, min_last: 2, ..text};
     let title = Role {font: Font::BOLD, space_after: LH, align: Align::Center, keep_with_next: true, ..text };
-    let header = Role {font: Font::BOLD, space_before: LH, space_after: LH / 2.0, keep_with_next: true, ..text};
+    let header = Role {font: Font::BOLD, space_before: LH, space_after: LH / 2.0, keep_with_next: true,  ..text};
+    let h1 = Role {size: SIZE * 2.0, ..header};
     let small = Role::text(SMALL, SMALL_LH);
     let around = |space| Role {space_before: space, space_after: space, ..text};
-
+    let caption = Role {text_color: Some(Color::new(140, 140, 140)), font: Font::ITALIC, align: Align::Right, space_after: 10.0, ..small};
+    
     Style {
          name: DocStyle::Modern, 
          fonts: Fonts { body: SANS_SERIF, mono: MONO },
-         page: Some(PageGeometry::A4),
+         page: Some(PageGeometry { number_align: Align::Right, ..PageGeometry::A4 }),
          border: 0.5, 
          sup_scale: 0.7, 
+         mono_bg: Some(Color::new(0xee, 0xee, 0xee)),
+         ext_link: ExtLink { color: Some(Color::new(0x1a, 0x5f, 0xd6)), under: true },
+         title_bar: TitleBar { bg: Some(Color::new(0x49, 0x4f, 0x60)), color: Some(Color::new(255, 255, 255)) },
          
          body: paragraph, 
-         comment: paragraph, 
-         comment_prefix: None, 
+         comment: Role {font: Font::ITALIC, first: INDENT / 2.0, bg_color: Some(Color::new(233,233, 233)), text_color: Some(Color::new(120, 120, 120)), squeeze: 20.0, ..paragraph}, 
+         comment_prefix: Some(">"), 
          
-         doc_title: Role {break_before: true, ..title}, 
-         
+         doc_title: Role {break_before: true, ..h1},
+
          headers: [
+            h1,
+            Role{size: SIZE * 1.75, ..header},
+            Role{size: SIZE * 1.5, ..header},
+            Role{size: SIZE * 1.25, ..header},
             header,
-            header,
-            header,
-            header,
-            header
          ], 
          
          numbering: Numbering { from: 1, to: 5, skip: 0, sep: ".", trailing: "." }, 
-         list: Role {min_first: 4, min_last: 4, ..text}, 
+         list: Role {first: INDENT * 1.5, min_first: 4, min_last: 4, marg_before: LH / 2.0, marg_after: LH / 2.0, ..text},
+         list_step: INDENT / 2.0,
+         list_hang: true,
          markers: Markers { ordered: "{n}.\u{a0}", unordered: "•\u{a0}" },
          captions: Captions { 
-            table: Caption { named: "Табл.\u{a0}{n}\u{a0}\u{a0}", anonymous: "", role: text },
-            image: Caption { named: "Рис.\u{a0}{n}\u{a0}\u{a0}", anonymous: "", role: text },
-            code: Caption { named: "Код\u{a0}{n}\u{a0}\u{a0}", anonymous: "", role: text },
+            table: Caption { named: "Табл.\u{a0}{n}:\u{a0}\u{a0}", anonymous: "", role: caption, caption_after: false },
+            image: Caption { named: "Рис.\u{a0}{n}:\u{a0}\u{a0}", anonymous: "", role: caption, caption_after: false },
+            code: Caption { named: "{n}\u{a0}|\u{a0}", anonymous: "", role: Role {font: Font::MONO, align: Align::Left, text_color: Some(Color::new(220, 220, 180)), ..caption}, caption_after: false },
             table_cont: "Табл. {n}",
             formula: "({n})", 
         },
         figure: around(LH / 2.0),
         images: Images { gap: 6.0, px: 0.75, broken_h: 3.0 * LH },
         formula: around(LH),
-        code: Role { font: Font::MONO, min_first: 2, min_last: 2, ..Role { space_before: LH / 2.0, space_after: LH / 2.0, ..small } },
+        code: Role { font: Font::MONO, min_first: 2, min_last: 2, marg_before: 20.0, marg_after: 20.0, squeeze: 16.0, bg_color: Some(Color::new(0, 0, 0)), text_color: Some(Color::new(220, 220, 220)), ..Role { space_before: LH / 2.0, space_after: LH / 2.0, ..small } },
         code_frame: Frame { border: 0.75, pad_x: 6.0, pad_y: 4.0 },
+        code_border: false,
+        code_numbers: true,
         table: Role { min_first: 1, min_last: 1, ..around(LH / 2.0) },
         cell: small,
-        head_cell: Role { align: Align::Center, ..small },
+        head_cell: Role { align: Align::Center, font: Font::BOLD, bg_color: Some(Color::new(222, 184, 135)), ..small },
         cell_frame: Frame { border: 0.75, pad_x: 4.0, pad_y: 2.0 },
+        table_lines: TableLines::ALL,
         notes: Notes {
-            role: Role { first: INDENT, align: Align::Justify, ..small },
+            role: Role { align: Align::Right, bg_color: Some(Color::new(233, 233, 233)), marg_before: 2.0 * LH, marg_after: 2.0 * LH, squeeze: 8.0, ..small },
             sep: 10.0,
-            rule_w: 50.0 * MM,
+            rule: false,
+            rule_w: 150.0 * MM,
             rule_top: 3.0,
         },
         toc: Some(Toc {

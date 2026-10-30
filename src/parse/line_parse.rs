@@ -4,6 +4,7 @@ use std::ops::AddAssign;
 use std::str::CharIndices;
 
 use crate::parse::{lexemas::*, common::*};
+use crate::color::Color;
 
 impl Color {
     fn ru_color_const(line: &str) -> Option<Color> {

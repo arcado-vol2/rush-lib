@@ -23,9 +23,11 @@ fn align_name(a: Align) -> &'static str {
     }
 }
 
-fn role_rule(out: &mut String, selector: &str, role: &Role, indent: Option<String>) {
+fn role_rule(out: &mut String, selector: &str, role: &Role, indent: Option<String>, outer: bool) {
     let family = if role.font.mono { "var(--mono)" } else { "var(--body)" };
     let first = indent.unwrap_or_else(|| format!("{}pt", role.first - role.rest));
+    let (before, after) = if outer { (role.marg_before, role.marg_after) } else { (0.0, 0.0) };
+    let squeeze = if outer { role.squeeze } else { 0.0 };
     let _ = write!(out, "{selector} {{ font-family: {family}; font-size: {}pt; line-height: {}pt; font-weight: {}; font-style: {}; \
         text-transform: {}; text-align: {}; text-indent: {first}; margin: {}pt 0 {}pt;",
         role.size, role.lh,
@@ -33,9 +35,10 @@ fn role_rule(out: &mut String, selector: &str, role: &Role, indent: Option<Strin
         if role.font.italic { "italic" } else { "normal" },
         if role.upper { "uppercase" } else { "none" },
         align_name(role.align),
-        role.space_before, role.space_after);
-    if role.rest > 0.0 {
-        let _ = write!(out, " padding-left: {}pt;", role.rest);
+        role.space_before + before, role.space_after + after);
+    if role.rest > 0.0 || squeeze > 0.0 {
+        let y = if outer { role.squeeze_y() } else { 0.0 };
+        let _ = write!(out, " padding: {y}pt {squeeze}pt {y}pt {}pt;", squeeze + role.rest);
     }
     if role.align == Align::Justify {
         out.push_str(" hyphens: auto;");
@@ -45,6 +48,12 @@ fn role_rule(out: &mut String, selector: &str, role: &Role, indent: Option<Strin
     }
     if role.break_before {
         out.push_str(" break-before: page;");
+    }
+    if let Some(bg_color) = role.bg_color {
+        let _ = write!(out, " background-color: {};", bg_color.to_hex_tag());
+    }
+    if let Some(text_color) = role.text_color {
+        let _ = write!(out, " color: {};", text_color.to_hex_tag());
     }
     out.push_str(" }\n");
 }
@@ -60,31 +69,117 @@ fn css(style: &Style) -> String {
         style.notes.rule_w, style.images.gap);
     out.push_str(BASE_CSS);
     let list = &style.list;
-    let rules: [(&str, &Role, Option<String>); 16] = [
-        ("main p", &style.body, None),
-        ("main p.comment", &style.comment, None),
-        ("main h1", &style.headers[0], None),
-        ("main h2", &style.headers[1], None),
-        ("main h3", &style.headers[2], None),
-        ("main h4", &style.headers[3], None),
-        ("main h5", &style.headers[4], None),
-        ("main .list > .item", list, Some(format!("calc({}pt * (var(--level, 0) + 1))", list.first - list.rest))),
-        ("main .figure", &style.figure, None),
-        ("main .formula", &style.formula, None),
-        ("main .code", &style.code, None),
-        ("main .table", &style.table, None),
-        ("main .table td", &style.cell, None),
-        ("main .table th", &style.head_cell, None),
-        ("main .notes > .note", &style.notes.role, None),
-        ("main .formula > .name", &style.body, None),
+    let rules: [(&str, &Role, Option<String>, bool); 16] = [
+        ("main p", &style.body, None, true),
+        ("main p.comment", &style.comment, None, true),
+        ("main h1", &style.headers[0], None, true),
+        ("main h2", &style.headers[1], None, true),
+        ("main h3", &style.headers[2], None, true),
+        ("main h4", &style.headers[3], None, true),
+        ("main h5", &style.headers[4], None, true),
+        ("main .list > .item", list, Some(list_indent(style)), false),
+        ("main .figure", &style.figure, None, true),
+        ("main .formula", &style.formula, None, true),
+        ("main .code", &style.code, None, true),
+        ("main .table", &style.table, None, true),
+        ("main .table td", &style.cell, None, false),
+        ("main .table th", &style.head_cell, None, false),
+        ("main .notes > .note", &style.notes.role, None, false),
+        ("main .formula > .name", &style.body, None, false),
     ];
-    for (sel, role, indent) in rules {
-        role_rule(&mut out, sel, role, indent);
+    for (sel, role, indent, outer) in rules {
+        role_rule(&mut out, sel, role, indent, outer);
     }
     for (sel, cap) in [("main .table > .cap", &style.captions.table), ("main .figure > .cap", &style.captions.image), ("main .code > .cap", &style.captions.code)] {
-        role_rule(&mut out, sel, &cap.role, None);
+        role_rule(&mut out, sel, &cap.role, None, false);
+    }
+    for (sel, role, top) in [("main .list", list, ""), ("main .notes", &style.notes.role, ".4em + ")] {
+        let (y, x) = (role.squeeze_y(), role.squeeze);
+        let _ = write!(out, "{sel} {{ margin: {}pt 0 {}pt; padding: calc({top}{y}pt) {x}pt {y}pt;", role.marg_before, role.marg_after);
+        if let Some(bg) = role.bg_color {
+            let _ = write!(out, " background-color: {};", bg.to_hex_tag());
+        }
+        out.push_str(" }\n");
+    }
+    if style.list_hang {
+        let _ = writeln!(out, "main .list > .item {{ display: flex; padding-left: calc({}pt + var(--level, 0) * {}pt); }}", list.first, style.list_step);
+        out.push_str("main .list > .item > .marker { flex: none; white-space: pre; }\n");
+        out.push_str("main .list > .item > .text { flex: 1; min-width: 0; }\n");
+    }
+    title_bar_css(&mut out, style);
+    let ext = &style.ext_link;
+    let _ = write!(out, "main a.ext {{ text-decoration: {};", if ext.under { "underline" } else { "none" });
+    if let Some(color) = ext.color {
+        let _ = write!(out, " color: {};", color.to_hex_tag());
+    }
+    out.push_str(" }
+");
+    if let Some(bg) = style.mono_bg {
+        let _ = writeln!(out, "main .mono {{ background-color: {}; }}", bg.to_hex_tag());
+    }
+    code_css(&mut out, style);
+    table_css(&mut out, style);
+    if !style.notes.rule {
+        out.push_str("main .notes { background-image: none; }\n");
     }
     out
+}
+
+fn list_indent(style: &Style) -> String {
+    let list = &style.list;
+    if style.list_hang {
+        "0".into()
+    } else {
+        format!("calc({}pt + var(--level, 0) * {}pt)", list.first - list.rest, style.list_step)
+    }
+}
+
+fn title_bar_css(out: &mut String, style: &Style) {
+    let bar = &style.title_bar;
+    let role = &style.doc_title;
+    let _ = writeln!(out, ":root {{ --title-h: {}pt; }}", (role.size * 1.5).max(36.0));
+    let _ = write!(out, "header.title {{ font-size: {}pt; font-weight: {}; font-style: {}; text-transform: {}; text-align: {};",
+        role.size,
+        if role.font.bold { "bold" } else { "normal" },
+        if role.font.italic { "italic" } else { "normal" },
+        if role.upper { "uppercase" } else { "none" },
+        align_name(role.align));
+    if let Some(bg) = bar.bg {
+        let _ = write!(out, " background: {};", bg.to_hex_tag());
+    }
+    if let Some(color) = bar.color {
+        let _ = write!(out, " color: {};", color.to_hex_tag());
+    }
+    out.push_str(" }\n");
+}
+
+fn code_css(out: &mut String, style: &Style) {
+    let pad_x = style.code_frame.pad_x;
+    if style.code_border {
+        out.push_str("main .code > .body { border: var(--border) solid var(--ink); }\n");
+        out.push_str("main .code > .body > pre { padding: var(--code-pad); }\n");
+        out.push_str("main .code > .body > .nums { border-right: var(--border) solid var(--ink); }\n");
+    } else {
+        let _ = writeln!(out, "main .code > .body > .nums {{ padding-right: {}pt; }}", 2.0 * pad_x);
+    }
+}
+
+fn table_css(out: &mut String, style: &Style) {
+    let lines = &style.table_lines;
+    if !lines.frame {
+        out.push_str("main .table > table { border-style: hidden; }\n");
+    }
+    for (cell, grid) in [("th", lines.head), ("td", lines.body)] {
+        if !grid.rows {
+            let _ = writeln!(out, "main .table {cell} {{ border-top-style: none; border-bottom-style: none; }}");
+        }
+        if !grid.cols {
+            let _ = writeln!(out, "main .table {cell} {{ border-left-style: none; border-right-style: none; }}");
+        }
+    }
+    if !lines.head.rows {
+        out.push_str("main .table thead + tbody > tr:first-child > td { border-top-style: hidden; }\n");
+    }
 }
 
 fn file_href(res: &Resources, from: Id<FileId>, to: Id<FileId>) -> String {
@@ -106,7 +201,7 @@ impl Writer<'_> {
                     Link::Doc(id) => file_href(self.ctx.res, self.file, *id),
                     Link::Anchor(a) => format!("#{}", a.id()),
                 };
-                out.write_str("<a href=\"")?;
+                out.write_str(if matches!(link, Link::Url(_)) { "<a class=\"ext\" href=\"" } else { "<a href=\"" })?;
                 escape(out, &href)?;
                 out.write_str("\">")?;
                 close.push("</a>");
@@ -152,6 +247,18 @@ impl Writer<'_> {
             out.write_str("</span>")?;
         }
         out.write_str("</div>")
+    }
+
+    fn captioned(&self, out: &mut String, caption: &Caption, body: impl FnOnce(&mut String) -> fmt::Result) -> fmt::Result {
+        let after = self.ctx.style.captions.of(caption.kind).caption_after;
+        if !after {
+            self.caption(out, caption)?;
+        }
+        body(out)?;
+        if after {
+            self.caption(out, caption)?;
+        }
+        Ok(())
     }
 
     fn cells(&self, out: &mut String, rows: &[Vec<Cell>], aligns: &[Align], tag: &str) -> fmt::Result {
@@ -212,25 +319,28 @@ impl Writer<'_> {
             Block::List(items) => {
                 out.write_str("<div class=\"list\">")?;
                 for item in items {
-                    write!(out, "<div class=\"item\" style=\"--level: {}\">", item.level)?;
+                    write!(out, "<div class=\"item\" style=\"--level: {}\"><span class=\"marker\">", item.level)?;
                     escape(out, &item.marker)?;
+                    out.write_str("</span><span class=\"text\">")?;
                     self.runs(out, &item.runs)?;
-                    out.write_str("</div>")?;
+                    out.write_str("</span></div>")?;
                 }
                 out.write_str("</div>")
             }
             Block::Figure { caption, image, scale, anchor } => {
-                write!(out, "<div class=\"figure\" id=\"{}\"><div class=\"body\">", anchor.id())?;
-                match image {
-                    Some(id) => {
-                        out.write_str("<img alt=\"\" src=\"")?;
-                        escape(out, &self.ctx.res.href(self.file, *id))?;
-                        write!(out, "\" style=\"zoom: {scale}%\">")?;
+                write!(out, "<div class=\"figure\" id=\"{}\">", anchor.id())?;
+                self.captioned(out, caption, |out| {
+                    out.write_str("<div class=\"body\">")?;
+                    match image {
+                        Some(id) => {
+                            out.write_str("<img alt=\"\" src=\"")?;
+                            escape(out, &self.ctx.res.href(self.file, *id))?;
+                            write!(out, "\" style=\"zoom: {scale}%\">")?;
+                        }
+                        None => out.write_str("<span class=\"error\">??</span>")?,
                     }
-                    None => out.write_str("<span class=\"error\">??</span>")?,
-                }
-                out.write_str("</div>")?;
-                self.caption(out, caption)?;
+                    out.write_str("</div>")
+                })?;
                 out.write_str("</div>")
             }
             Block::Formula { name, mathml, number, anchor, .. } => {
@@ -251,27 +361,39 @@ impl Writer<'_> {
             }
             Block::Code { caption, lines, anchor } => {
                 write!(out, "<div class=\"code\" id=\"{}\">", anchor.id())?;
-                self.caption(out, caption)?;
-                out.write_str("<pre><code>")?;
-                for line in lines {
-                    escape(out, line)?;
-                    out.write_char('\n')?;
-                }
-                out.write_str("</code></pre></div>")
+                self.captioned(out, caption, |out| {
+                    out.write_str("<div class=\"body\">")?;
+                    if style.code_numbers {
+                        out.write_str("<pre class=\"nums\" aria-hidden=\"true\">")?;
+                        for n in 1..=lines.len() {
+                            writeln!(out, "{n}")?;
+                        }
+                        out.write_str("</pre>")?;
+                    }
+                    out.write_str("<pre class=\"src\"><code>")?;
+                    for line in lines {
+                        escape(out, line)?;
+                        out.write_char('\n')?;
+                    }
+                    out.write_str("</code></pre></div>")
+                })?;
+                out.write_str("</div>")
             }
             Block::Table { caption, aligns, head, body, anchor, .. } => {
                 write!(out, "<div class=\"table\" id=\"{}\">", anchor.id())?;
-                self.caption(out, caption)?;
-                out.write_str("<table>")?;
-                if !head.is_empty() {
-                    let head_aligns = vec![style.head_cell.align; aligns.len()];
-                    out.write_str("<thead>")?;
-                    self.cells(out, head, &head_aligns, "th")?;
-                    out.write_str("</thead>")?;
-                }
-                out.write_str("<tbody>")?;
-                self.cells(out, body, aligns, "td")?;
-                out.write_str("</tbody></table></div>")
+                self.captioned(out, caption, |out| {
+                    out.write_str("<table>")?;
+                    if !head.is_empty() {
+                        let head_aligns = vec![style.head_cell.align; aligns.len()];
+                        out.write_str("<thead>")?;
+                        self.cells(out, head, &head_aligns, "th")?;
+                        out.write_str("</thead>")?;
+                    }
+                    out.write_str("<tbody>")?;
+                    self.cells(out, body, aligns, "td")?;
+                    out.write_str("</tbody></table>")
+                })?;
+                out.write_str("</div>")
             }
             Block::Notes(defs) => {
                 out.write_str("<div class=\"notes\">")?;

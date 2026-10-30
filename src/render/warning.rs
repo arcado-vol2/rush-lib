@@ -1,6 +1,7 @@
 use crate::config::{DocOut, DocStyle};
 use crate::parse::common::RefKind;
 
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum Feature {
     Paging,
@@ -39,7 +40,6 @@ pub enum RenderWarningKind {
 #[derive(Debug, Clone, PartialEq)]
 pub struct RenderWarning {
     pub origin: Origin,
-    /// source file, if the problem is about one
     pub file: Option<String>,
     pub kind: RenderWarningKind,
 }

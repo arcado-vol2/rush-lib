@@ -7,6 +7,7 @@ mod config;
 mod resources;
 mod content;
 mod project;
+mod color;
 
 pub use config::{Config, DocOut, DocStyle};
 pub use project::{Project, ProjectWarning};

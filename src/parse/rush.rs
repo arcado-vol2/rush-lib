@@ -3,6 +3,8 @@ use std::fmt;
 
 use crate::parse::{block_fragmentation::{Block, BlockKind, Counters, InnerProjectLinks, split_blocks_from, unescape_image_path}, common::*, lexemas::{BULLET_LIST, MARK, NUMERIC_LIST, TAB, TAB_WIDTH, TABLE_CENTER, TABLE_FUL_SEP, TABLE_LEFT, TABLE_MERGE_LEFT_TAG, TABLE_MERGE_UP_LEFT_TAG, TABLE_MERGE_UP_TAG, TABLE_RIGHT, TABLE_SEP, is_blank}, line_parse::{InlineContext, InlinePreEl, PreSpan, PreStyle, PreparsedLines, generate_pre_spans, parse_note_line}};
 use crate::resources::{Resources, Id, ImageId, FileId};
+use crate::color::Color;
+
 #[derive(Debug)]
 pub(crate) enum OuterLink<'a> {
     URL(&'a str),

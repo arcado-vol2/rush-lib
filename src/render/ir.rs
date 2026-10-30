@@ -1,4 +1,5 @@
-use crate::parse::common::{Color, Named, RefKind};
+use crate::color::Color;
+use crate::parse::common::{Named, RefKind};
 use crate::parse::rush::{Aligment, InlineEl, ListEl, ListElKind, Node, OuterLink, Rush, Span, TableEl};
 use crate::render::warning::{Feature, RenderWarning, RenderWarningKind};
 use crate::resources::{FileId, Id, ImageId, Resources};
@@ -44,7 +45,6 @@ impl Anchor {
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) enum Link {
     Url(String),
-    /// another project file: the format decides whether it is a page or an anchor
     Doc(Id<FileId>),
     Anchor(Anchor),
 }
@@ -52,10 +52,8 @@ pub(crate) enum Link {
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) enum RunText {
     Text(String),
-    /// place where the line can wrap
     Space,
     Ref(u16),
-    /// global note number
     Note(u16),
     Error,
 }
@@ -79,7 +77,6 @@ impl Run {
         Self::plain(RunText::Text(s.to_string()))
     }
 
-    /// Run text for places where markup is not needed
     pub(crate) fn label(&self) -> String {
         match &self.text {
             RunText::Text(s) => s.clone(),
@@ -105,7 +102,6 @@ pub(crate) enum CaptionKind {
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct Caption {
     pub(crate) kind: CaptionKind,
-    /// "Таблица 1 - ", the name follows right after it
     pub(crate) label: String,
     pub(crate) name: Option<Vec<Run>>,
 }
@@ -136,7 +132,6 @@ pub(crate) struct ListItem {
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) enum Cell {
     Text { col: usize, w: usize, h: usize, runs: Vec<Run> },
-    /// part of a merged area without its own text
     Empty { col: usize, join_top: bool, join_left: bool },
 }
 
@@ -144,7 +139,6 @@ pub(crate) enum Cell {
 pub(crate) struct NoteDef {
     pub(crate) g: u16,
     pub(crate) runs: Vec<Run>,
-    /// nothing refers to the note: it stays where it is defined
     pub(crate) anchored: bool,
 }
 
@@ -279,7 +273,7 @@ enum Slot<'a> {
     Empty { col: usize, join_top: bool, join_left: bool },
 }
 
-/// Combines cells marked for merging into rectangular areas
+
 fn merge_cells(mut rows: Vec<Vec<TableEl>>, cols: usize) -> Vec<Vec<Slot>> {
     let n = rows.len() * cols;
 
@@ -473,7 +467,6 @@ impl Ctx<'_> {
     }
 }
 
-/// Deferred note: its text is parsed after the whole document, when its global number is known
 enum PendingNote {
     Done(NoteDef),
     Later(u16),
@@ -630,7 +623,6 @@ fn doc(k: usize, src: Source, ctx: &mut Ctx, toc: &mut Vec<TocEntry>) -> Doc {
     Doc { file: src.file, title: src.title.to_string(), anchor, blocks, used: std::mem::take(&mut ctx.used) }
 }
 
-/// Documents go one after another: notes are numbered across all of them
 pub(crate) fn build(sources: Vec<Source>, style: &Style, res: &Resources, warn: &mut Vec<RenderWarning>) -> Project {
     let mut project = Project::default();
     let mut last_note = 0;

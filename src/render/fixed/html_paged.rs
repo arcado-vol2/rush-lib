@@ -45,6 +45,10 @@ fn line(out: &mut String, y: f32, l: &LineBox) {
             let _ = write!(out, "<span style=\"color:{}\">", col.to_hex_tag());
             close.push("</span>");
         }
+        if let Some(bg) = &run.bg {
+            let _ = write!(out, "<span style=\"background:{}\">", bg.to_hex_tag());
+            close.push("</span>");
+        }
         let _ = escape(out, &run.text);
         for c in close.iter().rev() {
             out.push_str(c);
@@ -58,6 +62,9 @@ fn item(out: &mut String, item: &Item) {
         Item::Line { y, line: l } => line(out, *y, l),
         Item::Rule { x, y, w, h } => {
             let _ = write!(out, "<div class=\"rule\" style=\"left:{x:.2}pt;top:{y:.2}pt;width:{w:.2}pt;height:{h:.2}pt\"></div>");
+        }
+        Item::Fill { x, y, w, h, color } => {
+            let _ = write!(out, "<div class=\"fill\" style=\"left:{x:.2}pt;top:{y:.2}pt;width:{w:.2}pt;height:{h:.2}pt;background:{}\"></div>", color.to_hex_tag());
         }
         Item::Leader { x, y, w } => {
             let _ = write!(out, "<div class=\"leader\" style=\"left:{x:.2}pt;top:{y:.2}pt;width:{w:.2}pt\"></div>");

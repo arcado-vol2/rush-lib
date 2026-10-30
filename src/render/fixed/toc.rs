@@ -4,7 +4,6 @@ use super::{Block, Item, Kind, LineBox, Piece};
 use crate::render::ir::{Link, Run, TocEntry};
 use std::collections::HashMap;
 
-/// Table of contents blocks; without `pages` - a draft to measure its length
 pub(crate) fn blocks(entries: &[TocEntry], pages: Option<&HashMap<String, usize>>, ctx: &Ctx) -> Vec<Block> {
     let Some(toc) = ctx.style.toc else { return Vec::new() };
     let w = ctx.w;
@@ -14,7 +13,7 @@ pub(crate) fn blocks(entries: &[TocEntry], pages: Option<&HashMap<String, usize>
     let title_lines = title.lines(Layout::of(title_role, w));
     let mut out = vec![Block {
         pieces: title_lines.into_iter().map(|line| Piece { height: line.lh, items: vec![Item::Line { y: 0.0, line }], notes: vec![] }).collect(),
-        space_after: title_role.space_after,
+        space_after: title_role.space_after + title_role.marg_after,
         keep_with_next: title_role.keep_with_next,
         ..Block::new(Kind::Text)
     }];

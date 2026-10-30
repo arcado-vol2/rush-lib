@@ -1,5 +1,7 @@
 use crate::config::DocStyle;
 use crate::render::Feature;
+use crate::render::ir::CaptionKind;
+use crate::color::Color;
 
 mod gost;
 mod modern;
@@ -31,7 +33,6 @@ impl Font {
     }
 }
 
-/// Font face file: (file name, data)
 pub(crate) type FontFile = (&'static str, &'static [u8]);
 
 #[derive(Debug, Clone, Copy)]
@@ -79,11 +80,20 @@ pub(crate) struct Role {
     pub(crate) rest: f32,
     pub(crate) space_before: f32,
     pub(crate) space_after: f32,
+    /// margin before and after the whole element: for lists and notes - the whole block, not each item
+    pub(crate) marg_before: f32,
+    pub(crate) marg_after: f32,
     pub(crate) keep_with_next: bool,
     pub(crate) break_before: bool,
     /// how many block lines to keep together at the start and end of a page
     pub(crate) min_first: usize,
     pub(crate) min_last: usize,
+
+    pub(crate) bg_color: Option<Color>,
+    pub(crate) text_color: Option<Color>,
+
+    /// inner padding of the whole element: `squeeze` left and right, half of it top and bottom
+    pub(crate) squeeze: f32,
 }
 
 impl Role {
@@ -98,11 +108,20 @@ impl Role {
             rest: 0.0,
             space_before: 0.0,
             space_after: 0.0,
+            marg_before: 0.0,
+            marg_after: 0.0,
             keep_with_next: false,
             break_before: false,
             min_first: usize::MAX,
             min_last: 1,
+            bg_color: None,
+            text_color: None,
+            squeeze: 0.0
         }
+    }
+
+    pub(crate) fn squeeze_y(&self) -> f32 {
+        (self.squeeze * 0.5).round()
     }
 }
 
@@ -117,6 +136,8 @@ pub(crate) struct PageGeometry {
     /// bottom reserve for measurement error
     pub(crate) slack: f32,
     pub(crate) numbers: bool,
+    /// page number position in the bottom margin
+    pub(crate) number_align: Align,
 }
 
 impl PageGeometry {
@@ -129,6 +150,7 @@ impl PageGeometry {
         left: 30.0 * MM,
         slack: 4.0,
         numbers: true,
+        number_align: Align::Center,
     };
 
     pub(crate) fn text_w(&self) -> f32 {
@@ -146,6 +168,8 @@ pub(crate) struct Caption {
     pub(crate) named: &'static str,
     pub(crate) anonymous: &'static str,
     pub(crate) role: Role,
+    /// caption after the content; before it by default
+    pub(crate) caption_after: bool,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -155,6 +179,16 @@ pub(crate) struct Captions {
     pub(crate) code: Caption,
     pub(crate) table_cont: &'static str,
     pub(crate) formula: &'static str,
+}
+
+impl Captions {
+    pub(crate) fn of(&self, kind: CaptionKind) -> &Caption {
+        match kind {
+            CaptionKind::Table => &self.table,
+            CaptionKind::Image => &self.image,
+            CaptionKind::Code => &self.code,
+        }
+    }
 }
 
 pub(crate) fn fill(template: &str, n: u16) -> String {
@@ -190,10 +224,24 @@ pub(crate) struct Markers {
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct Toc {
     pub(crate) title: &'static str,
-    /// deeper headers are left out of the table of contents
+
     pub(crate) max_level: u8,
     pub(crate) title_role: Role,
     pub(crate) entry: Role,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct ExtLink {
+    pub(crate) color: Option<Color>,
+    pub(crate) under: bool,
+}
+
+
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct TitleBar {
+    /// no color - the page color
+    pub(crate) bg: Option<Color>,
+    pub(crate) color: Option<Color>,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -204,10 +252,34 @@ pub(crate) struct Frame {
 }
 
 #[derive(Debug, Clone, Copy)]
+pub(crate) struct Grid {
+    /// between rows; under the header too
+    pub(crate) rows: bool,
+    /// between columns
+    pub(crate) cols: bool,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct TableLines {
+    pub(crate) frame: bool,
+    pub(crate) head: Grid,
+    pub(crate) body: Grid,
+}
+
+impl TableLines {
+    pub(crate) const ALL: TableLines = TableLines {
+        frame: true,
+        head: Grid { rows: true, cols: true },
+        body: Grid { rows: true, cols: true },
+    };
+}
+
+#[derive(Debug, Clone, Copy)]
 pub(crate) struct Notes {
     pub(crate) role: Role,
     /// height of the separator above notes
     pub(crate) sep: f32,
+    pub(crate) rule: bool,
     pub(crate) rule_w: f32,
     pub(crate) rule_top: f32,
 }
@@ -227,6 +299,10 @@ pub(crate) struct Style {
     pub(crate) page: Option<PageGeometry>,
     pub(crate) border: f32,
     pub(crate) sup_scale: f32,
+    /// background of a monospace fragment in text; code is styled by its own role
+    pub(crate) mono_bg: Option<Color>,
+    pub(crate) title_bar: TitleBar,
+    pub(crate) ext_link: ExtLink,
 
     pub(crate) body: Role,
     pub(crate) comment: Role,
@@ -235,6 +311,10 @@ pub(crate) struct Style {
     pub(crate) headers: [Role; 5],
     pub(crate) numbering: Numbering,
     pub(crate) list: Role,
+    /// sub-item shift per nesting level
+    pub(crate) list_step: f32,
+    /// wrapped item lines align with the text after the marker, not with `rest`
+    pub(crate) list_hang: bool,
     pub(crate) markers: Markers,
     pub(crate) captions: Captions,
 
@@ -243,10 +323,14 @@ pub(crate) struct Style {
     pub(crate) formula: Role,
     pub(crate) code: Role,
     pub(crate) code_frame: Frame,
+    pub(crate) code_border: bool,
+    /// code line numbers; with a border, the numbers are separated by a line
+    pub(crate) code_numbers: bool,
     pub(crate) table: Role,
     pub(crate) cell: Role,
     pub(crate) head_cell: Role,
     pub(crate) cell_frame: Frame,
+    pub(crate) table_lines: TableLines,
     pub(crate) notes: Notes,
     pub(crate) toc: Option<Toc>,
 }

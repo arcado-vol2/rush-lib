@@ -18,7 +18,6 @@ pub use warning::{Feature, Origin, RenderWarning, RenderWarningKind};
 
 pub(crate) const FONTS_DIR: &str = "fonts";
 
-/// Format that writes the structure and leaves the layout to the viewer
 pub(crate) trait Semantic {
     fn out(&self) -> DocOut;
     fn supports(&self, feature: Feature) -> bool;
@@ -27,7 +26,6 @@ pub(crate) trait Semantic {
     fn page(&self, doc: &ir::Doc, ctx: &semantic::PageCtx) -> Result<String, fmt::Error>;
 }
 
-/// Format that draws finished pages
 pub(crate) trait Fixed {
     fn out(&self) -> DocOut;
     fn supports(&self, feature: Feature) -> bool;
@@ -44,6 +42,7 @@ impl Backend {
         match out {
             DocOut::Html => Backend::Semantic(&semantic::html::Html),
             DocOut::HtmlPaged => Backend::Fixed(&fixed::html_paged::HtmlPaged),
+            DocOut::Markdown => Backend::Semantic(&semantic::markdown::Markdown),
             _ => unimplemented!("not yet"),
         }
     }
@@ -80,7 +79,6 @@ pub(crate) fn escape<W: Write + ?Sized>(out: &mut W, s: &str) -> fmt::Result {
     out.write_str(&s[last..])
 }
 
-/// `@font-face` for all faces of the style; the files are in `dir` next to the css
 pub(crate) fn css_fonts(style: &Style, dir: &str) -> String {
     let mut out = String::new();
     for (family, font, (file, _)) in style.fonts.all() {
@@ -111,7 +109,6 @@ fn out_path(local: &Path) -> String {
     local.components().map(|c| c.as_os_str().to_string_lossy()).collect::<Vec<_>>().join("/")
 }
 
-/// Page geometry of the style; A4 with a warning if the style does not set it
 pub(crate) fn geometry(style: &Style, warn: &mut Vec<RenderWarning>) -> PageGeometry {
     style.page.unwrap_or_else(|| {
         warn.push(RenderWarning { origin: Origin::Style(style.name), file: None, kind: RenderWarningKind::Unsupported(Feature::Paging) });

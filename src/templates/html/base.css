@@ -103,18 +103,30 @@ main {
 .formula > .body { grid-row: 2; grid-column: 1; }
 .formula > .index { grid-row: 2; grid-column: 1; justify-self: end; }
 
-.code > pre {
+/* номера строк и текст - соседние блоки; рамку и линию между ними задаёт стиль */
+.code > .body { display: flex; }
+.code > .body > pre {
   margin: 0;
-  padding: var(--code-pad);
-  border: var(--border) solid var(--ink);
   font: inherit;
   white-space: pre;
-  overflow-x: auto;
   tab-size: 4;
 }
-.code > pre > code { font: inherit; }
+.code > .body > .nums {
+  flex: none;
+  text-align: right;
+  user-select: none;
+}
+.code > .body > .src {
+  flex: 1;
+  min-width: 0;
+  overflow-x: auto;
+}
+.code > .body > pre > code { font: inherit; }
 
-.figure > .body { margin-bottom: var(--image-gap); text-align: center; }
+/* промежуток между картинкой и подписью - с той стороны, где подпись */
+.figure > .body { text-align: center; }
+.figure > .body:not(:last-child) { margin-bottom: var(--image-gap); }
+.figure > .cap + .body { margin-top: var(--image-gap); }
 .figure > .body > img {
   max-width: 100%; height: auto;
   vertical-align: top;
@@ -123,6 +135,7 @@ main {
 .table > table {
   width: 100%;
   border-collapse: collapse;
+  border: var(--border) solid var(--ink);
 }
 .table th, .table td {
   border: var(--border) solid var(--ink);

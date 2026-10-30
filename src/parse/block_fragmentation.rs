@@ -141,7 +141,7 @@ impl<'a> Default for InnerProjectLinks<'a> {
 }
 
 
-/// All numbering counters; when files are joined, the next file continues from the previous totals
+
 #[derive(Debug, PartialEq, Default, Clone, Copy)]
 pub(crate) struct Counters {
     pub(crate) header: HeaderCounter,

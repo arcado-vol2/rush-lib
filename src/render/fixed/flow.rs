@@ -1,11 +1,11 @@
 use super::inline::{Inline, Layout};
 use super::metrics::Metrics;
-use super::{Block, Item, Kind, LineBox, Piece, PlacedRun};
+use super::{shifted, Block, Item, Kind, LineBox, Piece, PlacedRun};
 use crate::config::DocOut;
-use crate::render::ir::{self, Anchor, Caption, CaptionKind, Cell, Link, ParaKind, Run, RunText};
+use crate::render::ir::{self, Anchor, Caption, Cell, Link, ParaKind, Run, RunText};
 use crate::render::warning::{Origin, RenderWarning, RenderWarningKind};
 use crate::resources::Resources;
-use crate::style::{Align, PageGeometry, Role, Style};
+use crate::style::{Align, Grid, PageGeometry, Role, Style};
 use std::collections::HashMap;
 
 pub(crate) struct Warn<'w> {
@@ -28,9 +28,7 @@ pub(crate) struct Ctx<'c> {
     pub(crate) geometry: PageGeometry,
     pub(crate) metrics: Metrics,
     pub(crate) res: &'c Resources,
-    /// file index -> document number
     docs: HashMap<usize, usize>,
-    /// text area width
     pub(crate) w: f32,
 }
 
@@ -40,11 +38,14 @@ impl<'c> Ctx<'c> {
         Self { style, geometry, metrics: Metrics::new(&style.fonts), res, docs, w: geometry.text_w() }
     }
 
-    pub(crate) fn inline(&self, role: &Role) -> Inline<'_> {
-        Inline::new(&self.metrics, role, self.style.sup_scale)
+    pub(crate) fn width(&self, role: &Role) -> f32 {
+        (self.w - 2.0 * role.squeeze).max(self.w / 4.0)
     }
 
-    /// One line without wrapping
+    pub(crate) fn inline(&self, role: &Role) -> Inline<'_> {
+        Inline::new(&self.metrics, role, self.style.sup_scale).mono_bg(self.style.mono_bg).ext_link(self.style.ext_link)
+    }
+
     pub(crate) fn single(&self, text: &str, role: &Role) -> LineBox {
         let mut il = self.inline(role);
         il.text(text);
@@ -78,11 +79,10 @@ pub(crate) struct NoteBody {
 #[derive(Default)]
 pub(crate) struct Flow {
     pub(crate) blocks: Vec<Block>,
-    /// note texts indexed by global note number - 1
     pub(crate) notes: Vec<NoteBody>,
+    w: f32,
 }
 
-/// Lines stacked vertically: boxes, height, notes
 fn stack(lines: Vec<LineBox>) -> (Vec<Item>, f32, Vec<u16>) {
     let mut y = 0.0;
     let mut notes = Vec::new();
@@ -96,6 +96,24 @@ fn stack(lines: Vec<LineBox>) -> (Vec<Item>, f32, Vec<u16>) {
     (items, y, notes)
 }
 
+fn filled((mut items, h, notes): (Vec<Item>, f32, Vec<u16>), role: &Role, w: f32) -> (Vec<Item>, f32, Vec<u16>) {
+    if let Some(color) = role.bg_color {
+        items.insert(0, Item::Fill { x: 0.0, y: 0.0, w, h, color });
+    }
+    (items, h, notes)
+}
+
+fn caption_box(lines: Vec<LineBox>, role: &Role, w: f32) -> (Vec<Item>, f32, Vec<u16>) {
+    let (mut items, h, notes) = filled(stack(lines), role, w);
+    if items.is_empty() {
+        return (items, 0.0, notes);
+    }
+    for item in &mut items {
+        item.shift(0.0, role.space_before);
+    }
+    (items, role.space_before + h + role.space_after, notes)
+}
+
 fn pieces(lines: Vec<LineBox>) -> Vec<Piece> {
     lines.into_iter().map(|line| Piece {
         height: line.lh,
@@ -106,8 +124,11 @@ fn pieces(lines: Vec<LineBox>) -> Vec<Piece> {
 
 fn spaced(role: &Role, kind: Kind) -> Block {
     Block {
-        space_before: role.space_before,
-        space_after: role.space_after,
+        space_before: role.space_before + role.marg_before,
+        space_after: role.space_after + role.marg_after,
+        indent: role.squeeze,
+        pad_y: role.squeeze_y(),
+        bg: role.bg_color,
         keep_with_next: role.keep_with_next,
         break_before: role.break_before,
         min_first: role.min_first,
@@ -139,7 +160,6 @@ struct Row {
     reach: usize,
 }
 
-/// Owner of each grid cell: cells of one merged area are not separated by a line
 fn owners(rows: &[Vec<Cell>], cols: usize) -> Vec<Vec<usize>> {
     let mut grid = vec![vec![usize::MAX; cols]; rows.len()];
     let mut next = 0;
@@ -210,9 +230,10 @@ impl<'c> Table<'_, 'c> {
         }
     }
 
-    fn rows(&self, rows: Vec<Vec<LCell>>, owner: &[Vec<usize>], role: &Role, aligns: Option<&[Align]>) -> Vec<Row> {
+    fn rows(&self, rows: Vec<Vec<LCell>>, owner: &[Vec<usize>], role: &Role, aligns: Option<&[Align]>, grid: Grid, top: bool) -> Vec<Row> {
         let st = self.ctx.style;
         let b = st.cell_frame.border;
+        let frame = st.table_lines.frame;
         let cols = self.widths.len();
         let n = rows.len();
         let laid: Vec<Vec<(LCell, Vec<LineBox>)>> = rows.into_iter().map(|row| row.into_iter().map(|cell| {
@@ -249,15 +270,18 @@ impl<'c> Table<'_, 'c> {
 
         laid.into_iter().zip(heights).enumerate().map(|(r, (row, height))| {
             let mut items = Vec::new();
+            if let Some(color) = role.bg_color {
+                items.push(Item::Fill { x: 0.0, y: 0.0, w: self.xs[cols], h: height, color });
+            }
             let mut notes = Vec::new();
             let mut reach = r + 1;
             for c in 0..cols {
-                if r == 0 || owner[r - 1][c] != owner[r][c] {
+                if if r == 0 { top } else { grid.rows && owner[r - 1][c] != owner[r][c] } {
                     items.push(Item::Rule { x: self.xs[c] - b / 2.0, y: -b / 2.0, w: self.widths[c] + b, h: b });
                 }
             }
             for c in 0..=cols {
-                if c == 0 || c == cols || owner[r][c - 1] != owner[r][c] {
+                if if c == 0 || c == cols { frame } else { grid.cols && owner[r][c - 1] != owner[r][c] } {
                     items.push(Item::Rule { x: self.xs[c] - b / 2.0, y: -b / 2.0, w: b, h: height + b });
                 }
             }
@@ -294,14 +318,14 @@ impl Flow {
         il.marker(def.g.to_string());
         il.space();
         ctx.runs(&mut il, &def.runs, file, warn);
-        let (lines, height, _) = stack(il.lines(Layout::of(role, ctx.w)));
+        let (lines, height, _) = stack(il.lines(Layout::of(role, ctx.width(role))));
         let mut items = vec![Item::Anchor { y: 0.0, id: Anchor::Note(def.g).id() }];
-        items.extend(lines);
+        shifted(&lines, role.squeeze, 0.0, &mut items);
         self.set_note(def.g, NoteBody { items, height });
     }
 
     fn push(&mut self, block: Block, file: &str) {
-        self.blocks.push(Block { file: Some(file.to_string()), ..block });
+        self.blocks.push(Block { file: Some(file.to_string()), width: self.w, ..block });
     }
 
     fn text_block(&mut self, role: &Role, lines: Vec<LineBox>, file: &str) {
@@ -311,16 +335,12 @@ impl Flow {
         self.push(Block { pieces: pieces(lines), ..spaced(role, Kind::Text) }, file);
     }
 
-    fn caption(&self, caption: &Caption, ctx: &Ctx, file: &str, warn: &mut Warn) -> (Vec<Item>, f32, Vec<u16>) {
-        let caps = &ctx.style.captions;
-        let role = match caption.kind {
-            CaptionKind::Table => &caps.table.role,
-            CaptionKind::Image => &caps.image.role,
-            CaptionKind::Code => &caps.code.role,
-        };
+
+    fn caption(&self, caption: &Caption, w: f32, ctx: &Ctx, file: &str, warn: &mut Warn) -> (Vec<Item>, f32, Vec<u16>) {
+        let role = &ctx.style.captions.of(caption.kind).role;
         let mut il = ctx.inline(role);
         ctx.runs(&mut il, &caption.runs(), file, warn);
-        stack(il.lines(Layout::of(role, ctx.w)))
+        caption_box(il.lines(Layout::of(role, w)), role, w)
     }
 
     fn doc(&mut self, doc: &ir::Doc, ctx: &Ctx, warn: &mut Warn) {
@@ -328,7 +348,7 @@ impl Flow {
         let file = &ctx.res.files.local_path(doc.file).to_string_lossy().into_owned();
         let mut il = ctx.inline(&st.doc_title);
         il.text(&doc.title);
-        let mut lines = il.lines(Layout::of(&st.doc_title, ctx.w));
+        let mut lines = il.lines(Layout::of(&st.doc_title, ctx.width(&st.doc_title)));
         if lines.is_empty() {
             lines.push(LineBox::empty(st.doc_title.lh, st.doc_title.size));
         }
@@ -343,7 +363,7 @@ impl Flow {
                     };
                     let mut il = ctx.inline(role);
                     ctx.runs(&mut il, runs, file, warn);
-                    self.text_block(role, il.lines(Layout::of(role, ctx.w)), file);
+                    self.text_block(role, il.lines(Layout::of(role, ctx.width(role))), file);
                 }
                 ir::Block::Header { level, number, runs, anchor } => self.header(*level, number.as_deref(), runs, anchor, ctx, file, warn),
                 ir::Block::List(items) => {
@@ -353,8 +373,9 @@ impl Flow {
                         let mut il = ctx.inline(role);
                         il.text(&item.marker);
                         ctx.runs(&mut il, &item.runs, file, warn);
-                        let lay = Layout { first: role.first * (item.level + 1) as f32, ..Layout::of(role, ctx.w) };
-                        lines.extend(il.lines(lay));
+                        let first = role.first + st.list_step * item.level as f32;
+                        let rest = if st.list_hang { first + ctx.metrics.width(&item.marker, role.font, role.size) } else { role.rest };
+                        lines.extend(il.lines(Layout { first, rest, ..Layout::of(role, ctx.width(role)) }));
                     }
                     self.text_block(role, lines, file);
                 }
@@ -392,7 +413,7 @@ impl Flow {
             il.space();
         }
         ctx.runs(&mut il, runs, file, warn);
-        let lay = Layout { rest: role.rest + hang, ..Layout::of(role, ctx.w) };
+        let lay = Layout { rest: role.rest + hang, ..Layout::of(role, ctx.width(role)) };
         let mut lines = il.lines(lay);
         if lines.is_empty() {
             lines.push(LineBox::empty(role.lh, role.size));
@@ -403,8 +424,9 @@ impl Flow {
     #[allow(clippy::too_many_arguments)]
     fn figure(&mut self, caption: &Caption, image: Option<crate::resources::Id<crate::resources::ImageId>>, scale: u16, anchor: &Anchor, ctx: &Ctx, file: &str, warn: &mut Warn) {
         let st = ctx.style;
-        let (cap, cap_h, notes) = self.caption(caption, ctx, file, warn);
-        let max_h = ctx.geometry.text_h() - ctx.geometry.slack - cap_h - st.images.gap;
+        let fw = ctx.width(&st.figure);
+        let (cap, cap_h, notes) = self.caption(caption, fw, ctx, file, warn);
+        let max_h = ctx.geometry.text_h() - ctx.geometry.slack - cap_h - st.images.gap - 2.0 * st.figure.squeeze_y();
         let scale = scale as f32 / 100.0;
         let mut items = Vec::new();
         let img_h = match image {
@@ -415,12 +437,12 @@ impl Flow {
                     None => {
                         let local = ctx.res.images.local_path(id).to_string_lossy().into_owned();
                         warn.content(file, RenderWarningKind::ImageSizeUnknown(local));
-                        (ctx.w / 2.0, ctx.w * 3.0 / 8.0)
+                        (fw / 2.0, fw * 3.0 / 8.0)
                     }
                 };
-                let fit = (ctx.w / w.max(1.0)).min(max_h / h.max(1.0)).min(1.0);
+                let fit = (fw / w.max(1.0)).min(max_h / h.max(1.0)).min(1.0);
                 let (w, h) = (w * fit, h * fit);
-                items.push(Item::Image { x: (ctx.w - w) / 2.0, y: 0.0, w, h, src: ctx.res.root_relative(id) });
+                items.push(Item::Image { x: (fw - w) / 2.0, y: 0.0, w, h, src: ctx.res.root_relative(id) });
                 h
             }
             None => {
@@ -428,19 +450,23 @@ impl Flow {
                 let role = &st.captions.image.role;
                 let mut il = ctx.inline(role);
                 il.runs(&[Run::plain(RunText::Error)], &mut |_| None);
-                for line in il.lines(Layout::of(role, ctx.w)) {
+                for line in il.lines(Layout::of(role, fw)) {
                     items.push(Item::Line { y: (h - line.lh) / 2.0, line });
                 }
                 h
             }
         };
-        let top = img_h + st.images.gap;
+        let gap = st.images.gap;
+        let (img_y, cap_y) = if st.captions.image.caption_after { (0.0, img_h + gap) } else { (cap_h + gap, 0.0) };
+        for item in &mut items {
+            item.shift(0.0, img_y);
+        }
         for mut item in cap {
-            item.shift(0.0, top);
+            item.shift(0.0, cap_y);
             items.push(item);
         }
         self.push(Block {
-            pieces: vec![Piece { items, height: top + cap_h, notes }],
+            pieces: vec![Piece { items, height: img_h + gap + cap_h, notes }],
             id: Some(anchor.id()),
             ..spaced(&st.figure, Kind::Whole)
         }, file);
@@ -449,27 +475,28 @@ impl Flow {
     #[allow(clippy::too_many_arguments)]
     fn formula(&mut self, name: Option<&[Run]>, mathml: Option<&str>, src: &str, number: &str, anchor: &Anchor, ctx: &Ctx, file: &str, warn: &mut Warn) {
         let st = ctx.style;
+        let w = ctx.width(&st.formula);
         let (mut items, name_h, notes) = match name {
             Some(runs) => {
                 let mut il = ctx.inline(&st.body);
                 ctx.runs(&mut il, runs, file, warn);
-                stack(il.lines(Layout::of(&st.body, ctx.w)))
+                stack(il.lines(Layout::of(&st.body, w)))
             }
             None => (Vec::new(), 0.0, Vec::new()),
         };
         let h = approx_formula_height(src, st.body.size, st.body.lh);
         match mathml {
-            Some(m) => items.push(Item::Math { x: 0.0, y: name_h, w: ctx.w, h, size: st.body.size, mathml: m.to_string() }),
+            Some(m) => items.push(Item::Math { x: 0.0, y: name_h, w, h, size: st.body.size, mathml: m.to_string() }),
             None => {
                 let mut il = ctx.inline(&st.body);
                 il.runs(&[Run::plain(RunText::Error)], &mut |_| None);
-                for line in il.lines(Layout { width: ctx.w, first: 0.0, rest: 0.0, align: Align::Center }) {
+                for line in il.lines(Layout { width: w, first: 0.0, rest: 0.0, align: Align::Center }) {
                     items.push(Item::Line { y: name_h + (h - line.lh) / 2.0, line });
                 }
             }
         }
         let mut num = ctx.single(number, &st.body);
-        num.x = ctx.w - num.natural;
+        num.x = w - num.natural;
         items.push(Item::Line { y: name_h + (h - num.lh) / 2.0, line: num });
         self.push(Block {
             pieces: vec![Piece { items, height: name_h + h, notes }],
@@ -483,38 +510,53 @@ impl Flow {
         let st = ctx.style;
         let role = &st.code;
         let frame = &st.code_frame;
-        let (cap, cap_h, cap_notes) = self.caption(caption, ctx, file, warn);
+        let w = ctx.width(role);
+        let (cap, cap_h, cap_notes) = self.caption(caption, w, ctx, file, warn);
         let cw = ctx.metrics.width("0", role.font, role.size);
-        let max_chars = (((ctx.w - 2.0 * frame.pad_x - 2.0 * frame.border) / cw).floor() as usize).max(1);
-        let line_box = |text: String| {
+        let (b, pad_x, pad_y) = if st.code_border { (frame.border, frame.pad_x, frame.pad_y) } else { (0.0, 0.0, 0.0) };
+        let digits = if st.code_numbers { lines.len().max(1).to_string().len() } else { 0 };
+        let num_r = b + pad_x + digits as f32 * cw;
+        let (text_x, divider) = match (st.code_numbers, st.code_border) {
+            (false, _) => (b + pad_x, None),
+            (true, framed) => (num_r + 2.0 * frame.pad_x + b, framed.then_some(num_r + frame.pad_x)),
+        };
+        let max_chars = (((w - text_x - pad_x - b) / cw).floor() as usize).max(1);
+        let line_box = |x: f32, text: String| {
             let natural = ctx.metrics.width(&text, role.font, role.size);
             let runs = if text.is_empty() {
                 Vec::new()
             } else {
-                vec![PlacedRun { x: 0.0, text, font: role.font, size: role.size, sup: false, under: false, strike: false, color: None, link: None, error: false }]
+                vec![PlacedRun { x: 0.0, text, font: role.font, size: role.size, sup: false, under: false, strike: false, color: role.text_color, bg: None, link: None, error: false }]
             };
-            LineBox { x: 0.0, size: role.size, lh: role.lh, word_spacing: 0.0, natural, runs, notes: Vec::new() }
+            LineBox { x, size: role.size, lh: role.lh, word_spacing: 0.0, natural, runs, notes: Vec::new() }
         };
         let mut out = Vec::new();
-        for line in lines {
+        for (i, line) in lines.iter().enumerate() {
             let chars: Vec<char> = line.replace('\t', "    ").chars().collect();
             let boxes: Vec<LineBox> = if chars.is_empty() {
-                vec![line_box(String::new())]
+                vec![line_box(text_x, String::new())]
             } else {
-                chars.chunks(max_chars).map(|c| line_box(c.iter().collect())).collect()
+                chars.chunks(max_chars).map(|c| line_box(text_x, c.iter().collect())).collect()
             };
-            let (items, height, _) = stack(boxes);
+            let (mut items, height, _) = stack(boxes);
+            if st.code_numbers {
+                let mut num = line_box(0.0, (i + 1).to_string());
+                num.x = num_r - num.natural;
+                items.push(Item::Line { y: 0.0, line: num });
+            }
             out.push(Piece { items, height, notes: Vec::new() });
         }
         if out.is_empty() {
-            let (items, height, _) = stack(vec![line_box(String::new())]);
+            let (items, height, _) = stack(vec![line_box(text_x, String::new())]);
             out.push(Piece { items, height, notes: Vec::new() });
         }
-        out[0].notes = cap_notes;
+        let caption_after = st.captions.code.caption_after;
+        let at = if caption_after { out.len() - 1 } else { 0 };
+        out[at].notes = cap_notes;
         self.push(Block {
             pieces: out,
             id: Some(anchor.id()),
-            ..spaced(role, Kind::Code { caption: cap, caption_h: cap_h, width: ctx.w, border: frame.border, pad_x: frame.pad_x, pad_y: frame.pad_y })
+            ..spaced(role, Kind::Code { caption: cap, caption_h: cap_h, caption_after, width: w, border: b, pad_y, divider })
         }, file);
     }
 
@@ -522,7 +564,10 @@ impl Flow {
     fn table(&mut self, caption: &Caption, cont: &str, aligns: &[Align], head: &[Vec<Cell>], body: &[Vec<Cell>], anchor: &Anchor, ctx: &Ctx, file: &str, warn: &mut Warn) {
         let st = ctx.style;
         let cols = aligns.len();
-        let (cap, cap_h, mut head_notes) = self.caption(caption, ctx, file, warn);
+        let tw = ctx.width(&st.table);
+        let (cap, cap_h, cap_notes) = self.caption(caption, tw, ctx, file, warn);
+        let caption_after = st.captions.table.caption_after;
+        let mut head_notes = if caption_after { Vec::new() } else { cap_notes.clone() };
         let frame = &st.cell_frame;
         let extra_w = 2.0 * frame.pad_x + frame.border;
         let extra_h = 2.0 * frame.pad_y + frame.border;
@@ -530,14 +575,16 @@ impl Flow {
         let head_cells = Table::cells(ctx, head, &st.head_cell, file, warn);
         let body_cells = Table::cells(ctx, body, &st.cell, file, warn);
         let all: Vec<&Vec<LCell>> = head_cells.iter().chain(&body_cells).collect();
-        let widths = Table::column_widths(&all, cols, extra_w, st.cell.size, ctx.w);
+        let widths = Table::column_widths(&all, cols, extra_w, st.cell.size, tw);
         let mut xs = vec![0.0];
         for w in &widths {
             xs.push(xs.last().unwrap() + w);
         }
         let t = Table { ctx, widths, xs, extra_w, extra_h };
-        let head_rows = t.rows(head_cells, &owners(head, cols), &st.head_cell, None);
-        let body_rows = t.rows(body_cells, &owners(body, cols), &st.cell, Some(aligns));
+        let lines = &st.table_lines;
+        let body_top = if head.is_empty() { lines.frame } else { lines.head.rows };
+        let head_rows = t.rows(head_cells, &owners(head, cols), &st.head_cell, None, lines.head, lines.frame);
+        let body_rows = t.rows(body_cells, &owners(body, cols), &st.cell, Some(aligns), lines.body, body_top);
 
         let mut head_items = Vec::new();
         let mut head_h = 0.0;
@@ -573,30 +620,36 @@ impl Flow {
             groups.push(empty());
         }
         groups[0].notes.splice(0..0, head_notes);
+        if caption_after {
+            groups.last_mut().unwrap().notes.extend(cap_notes);
+        }
 
         let cont_role = &st.captions.table.role;
         let mut il = ctx.inline(cont_role);
         il.text(cont);
-        let (cont_items, cont_h, _) = stack(il.lines(Layout::of(cont_role, ctx.w)));
+        let (cont_items, cont_h, _) = caption_box(il.lines(Layout::of(cont_role, tw)), cont_role, tw);
         self.push(Block {
             pieces: groups,
             id: Some(anchor.id()),
             ..spaced(&st.table, Kind::Table {
                 caption: cap,
                 caption_h: cap_h,
+                caption_after,
                 cont: cont_items,
                 cont_h,
                 head: head_items,
                 head_h,
-                width: ctx.w,
+                width: tw,
                 border: frame.border,
+                frame: lines.frame,
+                head_sep: lines.head.rows,
             })
         }, file);
     }
 }
 
 pub(crate) fn build(project: &ir::Project, ctx: &Ctx, warn: &mut Warn) -> Flow {
-    let mut flow = Flow::default();
+    let mut flow = Flow { w: ctx.w, ..Flow::default() };
     for doc in &project.docs {
         flow.doc(doc, ctx, warn);
     }
@@ -609,9 +662,14 @@ mod tests {
     use crate::render::ir::tests::project_of;
 
     fn flow_of(src: &str) -> (Flow, Vec<RenderWarning>) {
+        flow_styled(src, |_| ())
+    }
+
+    fn flow_styled(src: &str, tune: impl FnOnce(&mut Style)) -> (Flow, Vec<RenderWarning>) {
         let (proj, project, mut out) = project_of(src);
         let res = &proj.resources;
-        let style = Style::of(crate::config::DocStyle::Gost7_32);
+        let mut style = Style::of(crate::config::DocStyle::Gost7_32);
+        tune(&mut style);
         let ctx = Ctx::new(&style, style.page.unwrap(), res, &project);
         let mut warn = Warn { out: &mut out, backend: DocOut::HtmlPaged };
         let flow = build(&project, &ctx, &mut warn);
@@ -656,6 +714,220 @@ mod tests {
         assert!(!head.is_empty());
         let rules = t.pieces[0].items.iter().filter(|i| matches!(i, Item::Rule { w, .. } if *w > 1.0)).count();
         assert_eq!(rules, 3, "верх двух клеток первой строки и верх второй клетки второй");
+    }
+
+    #[test]
+    fn table_lines_can_be_hidden() {
+        let src = "\\№ Т\n/ a / b /\n\\№-\n/ 1 / 2 /\n/ 3 / 4 /\n\\№";
+        let rules = |flow: &Flow| flow.blocks[1].pieces.iter().flat_map(|p| &p.items).filter(|i| matches!(i, Item::Rule { .. })).count();
+        let (all, _) = flow_of(src);
+        assert_eq!(rules(&all), 10);
+        let (no_rows, _) = flow_styled(src, |s| s.table_lines.body.rows = false);
+        assert_eq!(rules(&no_rows), 8, "остаётся линия под заголовком");
+        let (no_cols, _) = flow_styled(src, |s| s.table_lines.body.cols = false);
+        assert_eq!(rules(&no_cols), 8, "остаются боковые стороны рамки");
+        let (bare, _) = flow_styled(src, |s| {
+            s.table_lines.frame = false;
+            s.table_lines.head.rows = false;
+            s.table_lines.body.cols = false;
+        });
+        assert_eq!(rules(&bare), 2, "только линия между строками тела");
+        let Kind::Table { frame, .. } = bare.blocks[1].kind else { panic!() };
+        assert!(!frame);
+    }
+
+    #[test]
+    fn code_numbers_and_frame() {
+        let src = "\\// Л\nfn a()\n\nb\n\\//";
+        let (flow, _) = flow_styled(src, |s| s.code_numbers = true);
+        let pieces = &flow.blocks[1].pieces;
+        assert_eq!(texts(&pieces[1]), vec!["", "2"]);
+        let Kind::Code { divider, border, .. } = flow.blocks[1].kind else { panic!() };
+        assert!(divider.is_some() && border > 0.0);
+        let x = |p: &Piece, s: &str| p.items.iter().find_map(|i| match i {
+            Item::Line { line, .. } if line.runs.iter().any(|r| r.text == s) => Some(line.x),
+            _ => None,
+        }).unwrap();
+        assert!(x(&pieces[0], "1") < divider.unwrap() && divider.unwrap() < x(&pieces[0], "fn a()"));
+
+        let (flow, _) = flow_styled(src, |s| {
+            s.code_numbers = true;
+            s.code_border = false;
+        });
+        let Kind::Code { divider, border, pad_y, .. } = flow.blocks[1].kind else { panic!() };
+        assert_eq!((divider, border, pad_y), (None, 0.0, 0.0));
+    }
+
+    #[test]
+    fn caption_order_follows_style() {
+        let line_y = |p: &Piece| p.items.iter().find_map(|i| match i {
+            Item::Line { y, .. } => Some(*y),
+            _ => None,
+        }).unwrap();
+        let src = "\\// Л\nx\n\\//";
+        let (before, _) = flow_of(src);
+        let (after, _) = flow_styled(src, |s| s.captions.code.caption_after = true);
+        let (b, a) = (&before.blocks[1], &after.blocks[1]);
+        assert!(b.tail() == 0.0 && a.tail() > 0.0);
+        assert_eq!(a.head(true) + a.tail(), b.head(true));
+
+        let mut items = Vec::new();
+        a.place(0, a.pieces.len(), true, &mut 0.0, &mut items);
+        let caption_y = items.iter().filter_map(|i| match i {
+            Item::Line { y, line } if line.runs.iter().any(|r| r.text.contains("Листинг")) => Some(*y),
+            _ => None,
+        }).next().unwrap();
+        assert!(caption_y > line_y(&a.pieces[0]), "подпись под кодом");
+
+        let src = "\\(нет.png, Р)";
+        let (after, _) = flow_of(src);
+        let (before, _) = flow_styled(src, |s| s.captions.image.caption_after = false);
+        let caption_top = |f: &Flow| f.blocks[1].pieces[0].items.iter().find_map(|i| match i {
+            Item::Line { y, line } if line.runs.iter().any(|r| r.text.contains("Рисунок")) => Some(*y),
+            _ => None,
+        }).unwrap();
+        assert!(caption_top(&before) < caption_top(&after));
+    }
+
+    #[test]
+    fn squeeze_narrows_and_shifts_block() {
+        let src = "\\// Л\nx\n\\//";
+        let (plain, _) = flow_of(src);
+        let (sq, _) = flow_styled(src, |s| s.code.squeeze = 16.0);
+        let (p, s) = (&plain.blocks[1], &sq.blocks[1]);
+        assert_eq!((s.indent, s.pad_y), (16.0, 8.0));
+        assert_eq!(s.head(true), p.head(true) + 8.0);
+        assert_eq!(s.tail(), p.tail() + 8.0);
+        let (Kind::Code { width: pw, .. }, Kind::Code { width: sw, .. }) = (&p.kind, &s.kind) else { panic!() };
+        assert_eq!(*sw, pw - 32.0);
+        let left = |b: &Block| {
+            let mut items = Vec::new();
+            b.place(0, b.pieces.len(), true, &mut 0.0, &mut items);
+            items.iter().filter_map(|i| match i {
+                Item::Rule { x, .. } => Some(*x),
+                _ => None,
+            }).fold(f32::MAX, f32::min)
+        };
+        assert_eq!(left(s), left(p) + 16.0);
+    }
+
+    #[test]
+    fn background_and_text_color() {
+        use crate::color::Color;
+        let gray = Color::new(233, 233, 233);
+        let (flow, _) = flow_styled("\\\"\nтекст\n\\\"", |s| {
+            s.comment.bg_color = Some(gray);
+            s.comment.text_color = Some(Color::new(1, 2, 3));
+        });
+        let b = &flow.blocks[1];
+        let mut items = Vec::new();
+        b.place(0, b.pieces.len(), true, &mut 0.0, &mut items);
+        assert!(matches!(&items[0], Item::Fill { w, color, .. } if *w == b.width && *color == gray), "фон под текстом");
+        assert!(items.iter().any(|i| matches!(i, Item::Line { line, .. } if line.runs.iter().any(|r| r.color == Some(Color::new(1, 2, 3))))));
+
+        let (flow, _) = flow_styled("\\№ Т\n/ a / b /\n\\№-\n/ 1 / 2 /\n\\№", |s| s.head_cell.bg_color = Some(gray));
+        let Kind::Table { head, .. } = &flow.blocks[1].kind else { panic!() };
+        assert!(matches!(head[0], Item::Fill { .. }));
+    }
+
+    #[test]
+    fn mono_fragment_background() {
+        use crate::color::Color;
+        let eee = Color::new(0xee, 0xee, 0xee);
+        let (flow, _) = flow_styled("текст \\!код! текст\n\n\\// Л\nx\n\\//", |s| s.mono_bg = Some(eee));
+        let runs = |b: &Block| b.pieces.iter().flat_map(|p| &p.items).filter_map(|i| match i {
+            Item::Line { line, .. } => Some(line.runs.clone()),
+            _ => None,
+        }).flatten().collect::<Vec<PlacedRun>>();
+        let para = runs(&flow.blocks[1]);
+        assert!(para.iter().any(|r| r.text.contains("код") && r.bg == Some(eee)));
+        assert!(para.iter().any(|r| r.text.contains("текст") && r.bg.is_none()));
+        let code = flow.blocks.iter().find(|b| matches!(b.kind, Kind::Code { .. })).unwrap();
+        assert!(runs(code).iter().all(|r| r.bg.is_none()));
+    }
+
+    #[test]
+    fn external_links_styled() {
+        use crate::color::Color;
+        let blue = Color::new(0, 0, 255);
+        let (flow, _) = flow_styled("\\,a.ru(сайт) и \\,\\#1(якорь)", |s| s.ext_link = crate::style::ExtLink { color: Some(blue), under: true });
+        let runs: Vec<PlacedRun> = flow.blocks[1].pieces.iter().flat_map(|p| &p.items).filter_map(|i| match i {
+            Item::Line { line, .. } => Some(line.runs.clone()),
+            _ => None,
+        }).flatten().collect();
+        let site = runs.iter().find(|r| r.text.contains("сайт")).unwrap();
+        assert!(site.under && site.color == Some(blue));
+        assert!(runs.iter().filter(|r| r.text.contains('и')).all(|r| !r.under && r.color.is_none()));
+    }
+
+    #[test]
+    fn caption_keeps_role_spacing() {
+        let src = "\\// Л\nx\n\\//";
+        let (plain, _) = flow_of(src);
+        let (spaced, _) = flow_styled(src, |s| {
+            s.captions.code.role.space_before = 3.0;
+            s.captions.code.role.space_after = 10.0;
+        });
+        let cap = |f: &Flow| match &f.blocks[1].kind {
+            Kind::Code { caption, caption_h, .. } => (*caption_h, caption.iter().find_map(|i| match i {
+                Item::Line { y, .. } => Some(*y),
+                _ => None,
+            }).unwrap()),
+            _ => panic!(),
+        };
+        let ((ph, py), (sh, sy)) = (cap(&plain), cap(&spaced));
+        assert_eq!(sh, ph + 13.0);
+        assert_eq!(sy, py + 3.0);
+    }
+
+    #[test]
+    fn page_number_follows_style() {
+        let (proj, project, mut out) = project_of("текст");
+        let mut style = Style::of(crate::config::DocStyle::Gost7_32);
+        style.toc = None;
+        let x_of = |style: &Style, out: &mut Vec<RenderWarning>| {
+            let mut warn = Warn { out, backend: DocOut::HtmlPaged };
+            let lay = super::super::layout(&project, style, style.page.unwrap(), &proj.resources, &mut warn);
+            let g = style.page.unwrap();
+            lay.pages[0].items.iter().rev().find_map(|i| match i {
+                Item::Line { line, .. } => Some((line.x, line.natural, g.text_w())),
+                _ => None,
+            }).unwrap()
+        };
+        let (x, n, w) = x_of(&style, &mut out);
+        assert!((x - (w - n) / 2.0).abs() < 0.01);
+        style.page = Some(PageGeometry { number_align: Align::Right, ..style.page.unwrap() });
+        let (x, n, w) = x_of(&style, &mut out);
+        assert!((x - (w - n)).abs() < 0.01);
+    }
+
+    #[test]
+    fn list_levels_and_hanging_marker() {
+        let long = "слово ".repeat(40);
+        let src = format!("\\. {long}\n\\ . {long}");
+        let xs = |flow: &Flow| flow.blocks[1].pieces.iter().filter_map(|p| match &p.items[0] {
+            Item::Line { line, .. } => Some(line.x),
+            _ => None,
+        }).collect::<Vec<f32>>();
+        let (flow, _) = flow_styled(&src, |s| {
+            s.list_hang = true;
+            s.list_step = 20.0;
+        });
+        let x = xs(&flow);
+        assert!(x[1] > x[0]);
+        let sub = x.iter().position(|&v| v > x[1]).unwrap();
+        assert_eq!(x[sub], x[0] + 20.0);
+    }
+
+    #[test]
+    fn element_margins_add_to_spacing() {
+        let (plain, _) = flow_of("\\// Л\nx\n\\//");
+        let (marg, _) = flow_styled("\\// Л\nx\n\\//", |s| {
+            s.code.marg_before = 5.0;
+            s.code.marg_after = 7.0;
+        });
+        assert_eq!(marg.blocks[1].space_before, plain.blocks[1].space_before + 5.0);
+        assert_eq!(marg.blocks[1].space_after, plain.blocks[1].space_after + 7.0);
     }
 
     #[test]

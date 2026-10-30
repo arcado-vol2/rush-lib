@@ -1,8 +1,8 @@
 use super::metrics::Metrics;
 use super::{LineBox, PlacedRun};
-use crate::parse::common::Color;
+use crate::color::Color;
 use crate::render::ir::{Link, Run, RunText};
-use crate::style::{Align, Font, Role};
+use crate::style::{Align, ExtLink, Font, Role};
 use std::collections::VecDeque;
 
 const WIDTH_SAFETY: f32 = 0.5;
@@ -26,6 +26,8 @@ struct Attrs {
     under: bool,
     strike: bool,
     color: Option<Color>,
+    /// background of a monospace fragment
+    bg: Option<Color>,
     link: Option<String>,
     error: bool,
 }
@@ -51,6 +53,8 @@ pub(crate) struct Inline<'m> {
     font: Font,
     upper: bool,
     sup_scale: f32,
+    mono_bg: Option<Color>,
+    ext_link: Option<ExtLink>,
     attrs: Vec<Attrs>,
     words: Vec<Word>,
     cur: Word,
@@ -65,10 +69,22 @@ impl<'m> Inline<'m> {
             font: role.font,
             upper: role.upper,
             sup_scale,
-            attrs: vec![Attrs::default()],
+            mono_bg: None,
+            ext_link: None,
+            attrs: vec![Attrs { color: role.text_color, ..Attrs::default() }],
             words: Vec::new(),
             cur: Vec::new(),
         }
+    }
+
+    pub(crate) fn mono_bg(mut self, bg: Option<Color>) -> Self {
+        self.mono_bg = bg;
+        self
+    }
+
+    pub(crate) fn ext_link(mut self, ext: ExtLink) -> Self {
+        self.ext_link = Some(ext);
+        self
     }
 
     fn seg_width(&self, seg: &Seg) -> f32 {
@@ -141,7 +157,11 @@ impl<'m> Inline<'m> {
         for run in runs {
             let font = self.font.with(run.font);
             let link = run.link.as_ref().and_then(&mut *href);
-            let base = Attrs { under: run.under, strike: run.strike, color: run.color.clone(), link, error: false };
+            let ext = self.ext_link.filter(|_| link.is_some() && matches!(run.link, Some(Link::Url(_))));
+            let color = run.color.clone().or(ext.and_then(|e| e.color)).or_else(|| self.attrs[0].color.clone());
+            let under = run.under || ext.is_some_and(|e| e.under);
+            let bg = if run.font.mono { self.mono_bg } else { None };
+            let base = Attrs { under, strike: run.strike, color, bg, link, error: false };
             let size = self.size;
             match &run.text {
                 RunText::Text(s) => {
@@ -293,7 +313,7 @@ impl<'m> Inline<'m> {
             if let Some(last) = runs.last_mut()
                 && !seg.sup && !last.sup && last.font == seg.font && last.size == seg.size
                 && last.under == a.under && last.strike == a.strike && last.color == a.color
-                && last.link == a.link && last.error == a.error
+                && last.bg == a.bg && last.link == a.link && last.error == a.error
             {
                 last.text.push_str(text);
             } else {
@@ -306,6 +326,7 @@ impl<'m> Inline<'m> {
                     under: a.under,
                     strike: a.strike,
                     color: a.color.clone(),
+                    bg: a.bg,
                     link: a.link.clone(),
                     error: a.error,
                 });
