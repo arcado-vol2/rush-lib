@@ -46,6 +46,7 @@ pub(super) fn style() -> Style {
          border: 0.5, 
          sup_scale: 0.7, 
          mono_bg: Some(Color::new(0xee, 0xee, 0xee)),
+         non_russian: None,
          ext_link: ExtLink { color: Some(Color::new(0x1a, 0x5f, 0xd6)), under: true },
          title_bar: TitleBar { bg: Some(Color::new(0x49, 0x4f, 0x60)), color: Some(Color::new(255, 255, 255)) },
          

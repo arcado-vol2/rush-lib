@@ -245,6 +245,8 @@ impl<'o> Inline<'o> {
 struct Writer<'a> {
     ctx: &'a PageCtx<'a>,
     file: Id<FileId>,
+    /// the whole project in one file at the output root
+    joined: bool,
 }
 
 impl Writer<'_> {
@@ -267,8 +269,8 @@ impl Writer<'_> {
             };
             let href = match &run.link {
                 Some(Link::Url(u)) => Some(u.clone()),
-                Some(Link::Doc(id)) => Some(file_href(self.ctx, self.file, *id)),
-                Some(Link::Anchor(_)) | None => None,
+                Some(Link::Doc(id)) if !self.joined => Some(file_href(self.ctx, self.file, *id)),
+                Some(Link::Doc(_) | Link::Anchor(_)) | None => None,
             };
             if href != link {
                 if let Some(old) = link.take() {
@@ -370,7 +372,8 @@ impl Writer<'_> {
                         out.push_str("![");
                         escape(out, &caption.name.as_deref().map(ir::plain).unwrap_or_default());
                         out.push_str("](");
-                        dest(out, &self.ctx.res.href(self.file, *id));
+                        let res = self.ctx.res;
+                        dest(out, &if self.joined { res.root_relative(*id) } else { res.href(self.file, *id) });
                         out.push(')');
                     }
                     None => out.push_str("??"),
@@ -453,16 +456,33 @@ impl Semantic for Markdown {
     }
 
     fn page(&self, doc: &ir::Doc, ctx: &PageCtx) -> Result<String, fmt::Error> {
-        let w = Writer { ctx, file: doc.file };
-        let mut out = String::from("# ");
-        escape(&mut out, &doc.title);
-        for block in &doc.blocks {
-            out.push_str("\n\n");
-            w.block(&mut out, block)?;
-        }
-        out.push('\n');
+        let mut out = String::new();
+        write_doc(&mut out, doc, ctx, false)?;
         Ok(out)
     }
+
+    fn joined(&self, project: &ir::Project, ctx: &PageCtx) -> Result<String, fmt::Error> {
+        let mut out = String::new();
+        for (i, doc) in project.docs.iter().enumerate() {
+            if i > 0 {
+                out.push('\n');
+            }
+            write_doc(&mut out, doc, ctx, true)?;
+        }
+        Ok(out)
+    }
+}
+
+fn write_doc(out: &mut String, doc: &ir::Doc, ctx: &PageCtx, joined: bool) -> fmt::Result {
+    let w = Writer { ctx, file: doc.file, joined };
+    out.push_str("# ");
+    escape(out, &doc.title);
+    for block in &doc.blocks {
+        out.push_str("\n\n");
+        w.block(out, block)?;
+    }
+    out.push('\n');
+    Ok(())
 }
 
 #[cfg(test)]

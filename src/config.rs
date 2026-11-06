@@ -10,7 +10,6 @@ pub enum DocStyle {
 pub enum DocOut {
     #[default]
     Html,
-    HtmlPaged,
     Markdown,
     Pdf,
     Odt,
@@ -21,4 +20,6 @@ pub enum DocOut {
 pub struct Config {
     pub style: DocStyle,
     pub out: DocOut,
+    /// one output file for the whole project, otherwise one per rush file
+    pub single: bool,
 }

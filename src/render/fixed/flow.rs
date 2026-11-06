@@ -347,7 +347,7 @@ impl Flow {
         let st = ctx.style;
         let file = &ctx.res.files.local_path(doc.file).to_string_lossy().into_owned();
         let mut il = ctx.inline(&st.doc_title);
-        il.text(&doc.title);
+        il.runs(&ir::styled_runs(&doc.title, st), &mut |_| None);
         let mut lines = il.lines(Layout::of(&st.doc_title, ctx.width(&st.doc_title)));
         if lines.is_empty() {
             lines.push(LineBox::empty(st.doc_title.lh, st.doc_title.size));
@@ -671,7 +671,7 @@ mod tests {
         let mut style = Style::of(crate::config::DocStyle::Gost7_32);
         tune(&mut style);
         let ctx = Ctx::new(&style, style.page.unwrap(), res, &project);
-        let mut warn = Warn { out: &mut out, backend: DocOut::HtmlPaged };
+        let mut warn = Warn { out: &mut out, backend: DocOut::Html };
         let flow = build(&project, &ctx, &mut warn);
         (flow, out)
     }
@@ -886,7 +886,7 @@ mod tests {
         let mut style = Style::of(crate::config::DocStyle::Gost7_32);
         style.toc = None;
         let x_of = |style: &Style, out: &mut Vec<RenderWarning>| {
-            let mut warn = Warn { out, backend: DocOut::HtmlPaged };
+            let mut warn = Warn { out, backend: DocOut::Html };
             let lay = super::super::layout(&project, style, style.page.unwrap(), &proj.resources, &mut warn);
             let g = style.page.unwrap();
             lay.pages[0].items.iter().rev().find_map(|i| match i {

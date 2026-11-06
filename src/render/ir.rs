@@ -87,6 +87,11 @@ impl Run {
     }
 }
 
+/// Plain line styled as regular text
+pub(crate) fn styled_runs(text: &str, style: &Style) -> Vec<Run> {
+    style.text_parts(text).into_iter().map(|(part, font)| Run { font, ..Run::text(part) }).collect()
+}
+
 pub(crate) fn plain(runs: &[Run]) -> String {
     let s: String = runs.iter().filter(|r| !matches!(r.text, RunText::Note(_))).map(Run::label).collect();
     s.split_whitespace().collect::<Vec<_>>().join(" ")
@@ -387,7 +392,12 @@ impl Ctx<'_> {
             let run = |text: RunText, link: Option<Link>| Run { text, font, under: st.is_under, strike: st.is_strike, color: st.color.clone(), link };
             for el in span.text {
                 let r = match el {
-                    InlineEl::String(s) => run(RunText::Text(s.to_string()), link.clone()),
+                    InlineEl::String(s) => {
+                        for (part, extra) in self.style.text_parts(&s) {
+                            out.push(Run { font: font.with(extra), ..run(RunText::Text(part.to_string()), link.clone()) });
+                        }
+                        continue;
+                    }
                     InlineEl::Space => run(RunText::Space, link.clone()),
                     InlineEl::LongDash => run(RunText::Text("—".into()), link.clone()),
                     InlineEl::InnerLink(Ok(l)) => {
@@ -643,10 +653,13 @@ pub(crate) mod tests {
     use crate::project::Project as Proj;
 
     pub(crate) fn project_of(src: &str) -> (Proj, Project, Vec<RenderWarning>) {
+        project_styled(src, Style { non_russian: None, ..Style::of(DocStyle::Gost7_32) })
+    }
+
+    fn project_styled(src: &str, style: Style) -> (Proj, Project, Vec<RenderWarning>) {
         let mut p = Proj::new();
         p.add_file("doc", "doc.rush", src.to_string()).unwrap();
         let res = &p.resources;
-        let style = Style::of(DocStyle::Gost7_32);
         let rush = Rush::new(res.files.data(Id::new(0)), res);
         let mut warn = Vec::new();
         let project = build(vec![Source { file: Id::new(0), title: "Документ", rush }], &style, res, &mut warn);
@@ -692,6 +705,43 @@ pub(crate) mod tests {
         assert_eq!(cont, "Продолжение таблицы 1");
         assert!(matches!(body[0][0], Cell::Text { h: 2, .. }));
         assert!(p.docs[0].used.contains(&Feature::MergedCells));
+    }
+
+    fn gost_of(src: &str) -> Project {
+        project_styled(src, Style::of(DocStyle::Gost7_32)).1
+    }
+
+    fn font_of<'r>(runs: &'r [Run], text: &str) -> &'r Font {
+        &runs.iter().find(|r| r.text == RunText::Text(text.into())).unwrap().font
+    }
+
+    const MONO_ITALIC: Font = Font { mono: true, bold: false, italic: true };
+
+    #[test]
+    fn non_russian_in_text_and_links() {
+        let p = gost_of("Язык Rust и \\,https://a.ru(сайт site)");
+        let Block::Para { runs, .. } = &p.docs[0].blocks[0] else { panic!() };
+        assert_eq!(*font_of(runs, "Rust"), MONO_ITALIC);
+        assert_eq!(*font_of(runs, "site"), MONO_ITALIC);
+        assert_eq!(*font_of(runs, "Язык "), Font::default());
+        let site = runs.iter().find(|r| r.text == RunText::Text("site".into())).unwrap();
+        assert!(matches!(site.link, Some(Link::Url(_))));
+    }
+
+    #[test]
+    fn non_russian_adds_to_markup() {
+        let p = gost_of("\\:Rust: \\!Go!");
+        let Block::Para { runs, .. } = &p.docs[0].blocks[0] else { panic!() };
+        assert_eq!(*font_of(runs, "Rust"), Font { bold: true, ..MONO_ITALIC });
+        assert_eq!(*font_of(runs, "Go"), MONO_ITALIC);
+    }
+
+    #[test]
+    fn non_russian_in_caption_not_in_code() {
+        let p = gost_of("\\// Код Rust\nlet x\n\\//");
+        let Block::Code { caption, lines, .. } = &p.docs[0].blocks[0] else { panic!() };
+        assert_eq!(lines, &vec!["let x".to_string()]);
+        assert_eq!(*font_of(caption.name.as_ref().unwrap(), "Rust"), MONO_ITALIC);
     }
 
     #[test]

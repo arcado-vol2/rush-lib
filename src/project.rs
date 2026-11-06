@@ -8,6 +8,8 @@ pub enum ProjectWarning {
     FileNameCollision(String),
     UnknownContentPath(String),
     DuplicateContent(String),
+    /// the file is not in the single output: it is missing from the table of contents
+    NotInContent(String),
 }
 
 #[derive(Debug, Default, PartialEq)]
@@ -37,9 +39,10 @@ impl Project {
         self.resources.images.local_paths()
     }
 
-    pub fn index_dir_common(root: &Path) -> io::Result<(Project, Vec<ProjectWarning>)> {
+    /// `exclude` - a folder inside `root` that holds no sources, for example the output
+    pub fn index_dir_common(root: &Path, exclude: Option<&Path>) -> io::Result<(Project, Vec<ProjectWarning>)> {
         let mut collected = Collected::default();
-        walk(root, &mut collected)?;
+        walk(root, exclude, &mut collected)?;
 
         let mut project = Project::new();
         let mut warns = Vec::new();
@@ -79,14 +82,16 @@ fn keyed(root: &Path, mut paths: Vec<PathBuf>) -> io::Result<Vec<(String, String
     Ok(names.into_iter().zip(paths).map(|((key, local), global)| (key, local, global)).collect())
 }
 
-fn walk(dir: &Path, out: &mut Collected) -> io::Result<()> {
+fn walk(dir: &Path, exclude: Option<&Path>, out: &mut Collected) -> io::Result<()> {
     for entry in fs::read_dir(dir)? {
         let entry = entry?;
         let path = entry.path();
         let ft = entry.file_type()?;
 
         if ft.is_dir() {
-            walk(&path, out)?;
+            if exclude != Some(path.as_path()) {
+                walk(&path, exclude, out)?;
+            }
             continue;
         }
         if !ft.is_file() {
@@ -151,7 +156,7 @@ mod tests {
         fs::write(root.join("docs/guide/install.rush"), "").unwrap();
         fs::write(root.join("docs/pic.jpg"), "").unwrap();
         fs::write(root.join("docs/pic.png"), "не картинка").unwrap();
-        let (project, w) = Project::index_dir_common(&root).unwrap();
+        let (project, w) = Project::index_dir_common(&root, None).unwrap();
         fs::remove_dir_all(&root).unwrap();
 
         assert_eq!(w, vec![ProjectWarning::FileNameCollision("pic".into())]);
@@ -162,5 +167,19 @@ mod tests {
         let pic = res.get_image_id("pic").unwrap();
         assert_eq!(*res.images.data(pic), None);
         assert_eq!(project.images().collect::<Vec<_>>(), vec!["docs/pic.jpg"]);
+    }
+
+    #[test]
+    fn index_dir_common_skips_excluded_dir() {
+        let root = std::env::temp_dir().join("rush_lib_index_exclude");
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(root.join("out")).unwrap();
+        fs::write(root.join("pic.png"), "").unwrap();
+        fs::write(root.join("out/pic.png"), "").unwrap();
+        let (project, w) = Project::index_dir_common(&root, Some(&root.join("out"))).unwrap();
+        fs::remove_dir_all(&root).unwrap();
+
+        assert!(w.is_empty(), "{w:?}");
+        assert_eq!(project.images().collect::<Vec<_>>(), vec!["pic.png"]);
     }
 }

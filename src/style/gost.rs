@@ -43,6 +43,7 @@ pub(super) fn style() -> Style {
         border: 0.75,
         sup_scale: 0.7,
         mono_bg: None,
+        non_russian: Some(Font { italic: true, ..Font::MONO }),
         title_bar: TitleBar { bg: None, color: None },
         ext_link: ExtLink { color: None, under: true },
 

@@ -33,6 +33,37 @@ impl Font {
     }
 }
 
+// TODO: maybe this needs a different approach with several markup modes
+fn is_foreign(c: char) -> bool {
+    c.is_alphabetic() && matches!(c, 'A'..='Z' | 'a'..='z' | '\u{c0}'..='\u{24f}' | '\u{370}'..='\u{3ff}' | '\u{1f00}'..='\u{1fff}')
+}
+
+const WORD_EDGE: &[char] = &[',', '.', ';', ':', '!', '?', '…', '(', ')', '[', ']', '{', '}', '«', '»', '„', '“', '”', '"', '\'', '-', '–', '—'];
+
+
+fn split_foreign(s: &str) -> Vec<(&str, bool)> {
+    let mut out = Vec::new();
+    let mut last = 0;
+    let mut pos = 0;
+    for word in s.split(|c: char| c.is_whitespace() || (c.is_alphabetic() && !is_foreign(c))) {
+        let body = word.trim_matches(WORD_EDGE);
+        if body.chars().any(is_foreign) {
+            let start = pos + word.len() - word.trim_start_matches(WORD_EDGE).len();
+            if start > last {
+                out.push((&s[last..start], false));
+            }
+            last = start + body.len();
+            out.push((&s[start..last], true));
+        }
+        pos += word.len();
+        pos += s[pos..].chars().next().map_or(0, char::len_utf8);
+    }
+    if last < s.len() {
+        out.push((&s[last..], false));
+    }
+    out
+}
+
 pub(crate) type FontFile = (&'static str, &'static [u8]);
 
 #[derive(Debug, Clone, Copy)]
@@ -301,6 +332,8 @@ pub(crate) struct Style {
     pub(crate) sup_scale: f32,
     /// background of a monospace fragment in text; code is styled by its own role
     pub(crate) mono_bg: Option<Color>,
+    /// face for non-Russian words, added to the one set by markup and role
+    pub(crate) non_russian: Option<Font>,
     pub(crate) title_bar: TitleBar,
     pub(crate) ext_link: ExtLink,
 
@@ -351,6 +384,14 @@ impl Style {
     pub(crate) fn supports(&self, _feature: Feature) -> bool {
         true
     }
+
+    /// Text pieces, each with the face the style adds to it
+    pub(crate) fn text_parts<'s>(&self, s: &'s str) -> Vec<(&'s str, Font)> {
+        match self.non_russian {
+            Some(font) => split_foreign(s).into_iter().map(|(part, foreign)| (part, if foreign { font } else { Font::default() })).collect(),
+            None => vec![(s, Font::default())],
+        }
+    }
 }
 
 #[cfg(test)]
@@ -371,5 +412,49 @@ mod tests {
         assert_eq!(f.file(Font { bold: true, ..Font::MONO }).0, "LiberationMono-Bold.ttf");
         assert_eq!(f.file(Font::ITALIC).0, "LiberationSerif-Italic.ttf");
         assert_eq!(f.all().count(), 8);
+    }
+
+    fn foreign(s: &str) -> Vec<&str> {
+        split_foreign(s).into_iter().filter(|(_, f)| *f).map(|(p, _)| p).collect()
+    }
+
+    #[test]
+    fn foreign_words_whole() {
+        for word in ["x86_64", "C++", "C#", "Python3", "example.com", "αβγ", "Ω", "café"] {
+            assert_eq!(foreign(word), vec![word]);
+        }
+    }
+
+    #[test]
+    fn foreign_edges_and_mixed_words() {
+        assert_eq!(foreign("HTML-страница"), vec!["HTML"]);
+        assert_eq!(foreign("x86-совместимый"), vec!["x86"]);
+        assert_eq!(foreign("версияPython"), vec!["Python"]);
+        assert_eq!(foreign("(Python), «Rust»."), vec!["Python", "Rust"]);
+        assert_eq!(foreign("a\u{a0}b"), vec!["a", "b"]);
+    }
+
+    #[test]
+    fn not_foreign() {
+        for s in ["", "123", "++", "—", "русский текст, ёж", "10 %", "№ 5", "×÷"] {
+            assert_eq!(foreign(s), Vec::<&str>::new(), "{s}");
+        }
+    }
+
+    #[test]
+    fn foreign_parts_keep_the_text() {
+        let src = "Язык Rust (версия 1.70), α-частица и C++ ";
+        let parts = split_foreign(src);
+        assert_eq!(parts.iter().map(|(p, _)| *p).collect::<String>(), src);
+        assert_eq!(parts[0], ("Язык ", false));
+        assert_eq!(parts[1], ("Rust", true));
+    }
+
+    #[test]
+    fn style_decides_on_foreign_font() {
+        let gost = Style::of(DocStyle::Gost7_32);
+        let mono_italic = Font { italic: true, ..Font::MONO };
+        assert_eq!(gost.text_parts("а b"), vec![("а ", Font::default()), ("b", mono_italic)]);
+        assert_eq!(Style::of(DocStyle::Modern).text_parts("а b"), vec![("а b", Font::default())]);
     }
 }

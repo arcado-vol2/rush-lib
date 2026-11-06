@@ -43,7 +43,35 @@ pub struct OutFile {
 pub fn build(config: &Config, project: &Project) -> Result<(Vec<OutFile>, Vec<Warning>), fmt::Error> {
     let (content, content_warns) = Content::resolve(&project.content, &project.resources);
     let mut warns: Vec<Warning> = content_warns.into_iter().map(Warning::from).collect();
+    if config.single {
+        for (id, local, _) in project.resources.files.iter() {
+            if !content.items.iter().any(|item| item.file == id) {
+                warns.push(ProjectWarning::NotInContent(local.to_string_lossy().into_owned()).into());
+            }
+        }
+    }
     let (files, render_warns) = render::build(config, project, &content)?;
     warns.extend(render_warns.into_iter().map(Warning::from));
     Ok((files, warns))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn single_warns_about_files_outside_content() {
+        let mut p = Project::new();
+        p.add_file("a", "a.rush", "текст".into()).unwrap();
+        p.add_file("b", "b.rush", "текст".into()).unwrap();
+        p.add_content("А".into(), "a".into());
+        let not_in_content = vec![Warning::Project(ProjectWarning::NotInContent("b.rush".into()))];
+
+        for out in [DocOut::Html, DocOut::Markdown] {
+            let (_, warns) = build(&Config { out, single: true, ..Config::default() }, &p).unwrap();
+            assert_eq!(warns, not_in_content);
+            let (_, warns) = build(&Config { out, single: false, ..Config::default() }, &p).unwrap();
+            assert!(warns.is_empty(), "{warns:?}");
+        }
+    }
 }

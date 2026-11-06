@@ -441,7 +441,7 @@ impl Semantic for Html {
         out.write_str("</title><link rel=\"stylesheet\" href=\"")?;
         escape(&mut out, &res.root_href(file, CSS_NAME))?;
         out.write_str("\"></head><body><header class=\"title\">")?;
-        escape(&mut out, &doc.title)?;
+        w.runs(&mut out, &ir::styled_runs(&doc.title, ctx.style))?;
         out.write_str("</header>")?;
         if !ctx.content.items.is_empty() {
             out.write_str("<nav class=\"toc\">")?;
@@ -457,7 +457,7 @@ impl Semantic for Html {
                 if level > 0 {
                     out.write_str("–&nbsp;")?;
                 }
-                escape(&mut out, &item.name)?;
+                w.runs(&mut out, &ir::styled_runs(&item.name, ctx.style))?;
                 out.write_str("</a>")?;
             }
             out.write_str("</nav>")?;
@@ -466,5 +466,9 @@ impl Semantic for Html {
         out.write_str(&main)?;
         out.write_str("</main></body></html>")?;
         Ok(out)
+    }
+
+    fn joined(&self, _project: &ir::Project, _ctx: &PageCtx) -> Result<String, fmt::Error> {
+        unreachable!("html с single собирает постраничный вывод")
     }
 }

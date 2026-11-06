@@ -1,7 +1,7 @@
 use super::flow::Ctx;
 use super::inline::Layout;
 use super::{Block, Item, Kind, LineBox, Piece};
-use crate::render::ir::{Link, Run, TocEntry};
+use crate::render::ir::{styled_runs, Link, Run, TocEntry};
 use std::collections::HashMap;
 
 pub(crate) fn blocks(entries: &[TocEntry], pages: Option<&HashMap<String, usize>>, ctx: &Ctx) -> Vec<Block> {
@@ -27,7 +27,8 @@ pub(crate) fn blocks(entries: &[TocEntry], pages: Option<&HashMap<String, usize>
         let href = &mut |_: &Link| Some(format!("#{id}"));
         let indent = (e.level.saturating_sub(1)) as f32 * 2.0 * digit;
         let mut il = ctx.inline(role);
-        il.runs(&[link(&e.text)], href);
+        let text: Vec<Run> = styled_runs(&e.text, ctx.style).into_iter().map(|r| Run { link: Some(Link::Anchor(e.anchor.clone())), ..r }).collect();
+        il.runs(&text, href);
         let mut lines = il.lines(Layout { width: w - tail, first: indent, rest: indent, align: crate::style::Align::Left });
         let last = lines.pop().unwrap_or_else(|| LineBox { x: indent, ..LineBox::empty(role.lh, role.size) });
         let mut pieces: Vec<Piece> = lines.into_iter().map(|line| Piece { height: line.lh, items: vec![Item::Line { y: 0.0, line }], notes: vec![] }).collect();

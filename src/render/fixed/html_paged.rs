@@ -97,7 +97,7 @@ fn css(style: &Style, layout: &Layout) -> String {
 
 impl Fixed for HtmlPaged {
     fn out(&self) -> DocOut {
-        DocOut::HtmlPaged
+        DocOut::Html
     }
 
     fn supports(&self, _feature: Feature) -> bool {
