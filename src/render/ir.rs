@@ -154,8 +154,8 @@ pub(crate) enum Block {
     List(Vec<ListItem>),
     Figure { caption: Caption, image: Option<Id<ImageId>>, scale: u16, anchor: Anchor },
     Formula { name: Option<Vec<Run>>, mathml: Option<String>, src: String, number: String, anchor: Anchor },
-    Code { caption: Caption, lines: Vec<String>, anchor: Anchor },
-    Table { caption: Caption, cont: String, aligns: Vec<Align>, head: Vec<Vec<Cell>>, body: Vec<Vec<Cell>>, anchor: Anchor },
+    Code { caption: Caption, lang: Option<String>, lines: Vec<String>, anchor: Anchor },
+    Table { caption: Caption, cont: String, aligns: Vec<Align>, widths: Option<Vec<f32>>, head: Vec<Vec<Cell>>, body: Vec<Vec<Cell>>, anchor: Anchor },
     Notes(Vec<NoteDef>),
 }
 
@@ -565,12 +565,15 @@ fn doc(k: usize, src: Source, ctx: &mut Ctx, toc: &mut Vec<TocEntry>) -> Doc {
             Node::Code(c) => {
                 let (caption, index) = ctx.caption(CaptionKind::Code, c.named);
                 let lines = c.content.iter().map(|l| l.to_string()).collect();
-                Block::Code { caption, lines, anchor: Anchor::Code(index) }
+                Block::Code { caption, lang: c.lang.map(str::to_string), lines, anchor: Anchor::Code(index) }
             }
             Node::Table(t) => {
                 let cols = t.aligments.len();
                 if cols == 0 {
                     continue;
+                }
+                if t.widths.is_some() {
+                    ctx.used.insert(Feature::ColumnWidths);
                 }
                 let (caption, index) = ctx.caption(CaptionKind::Table, t.named);
                 let head = ctx.table(t.headers, cols);
@@ -579,6 +582,7 @@ fn doc(k: usize, src: Source, ctx: &mut Ctx, toc: &mut Vec<TocEntry>) -> Doc {
                     caption,
                     cont: fill(style.captions.table_cont, index),
                     aligns: t.aligments.into_iter().map(align).collect(),
+                    widths: t.widths,
                     head,
                     body,
                     anchor: Anchor::Table(index),

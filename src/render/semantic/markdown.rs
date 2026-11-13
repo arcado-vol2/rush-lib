@@ -390,10 +390,11 @@ impl Writer<'_> {
                     None => out.push_str("??"),
                 }
             }
-            Block::Code { caption, lines, .. } => self.captioned(out, caption, |out| {
+            Block::Code { caption, lang, lines, .. } => self.captioned(out, caption, |out| {
                 let run = lines.iter().map(|l| longest_run(l, '`')).max().unwrap_or(0);
                 let fence = "`".repeat(run.max(2) + 1);
-                writeln!(out, "{fence}")?;
+                let lang = lang.as_deref().filter(|_| self.ctx.style.highlight_code_syntax).unwrap_or("");
+                writeln!(out, "{fence}{lang}")?;
                 for line in lines {
                     writeln!(out, "{line}")?;
                 }
@@ -443,7 +444,7 @@ impl Semantic for Markdown {
     fn supports(&self, feature: Feature) -> bool {
         match feature {
             Feature::Strike | Feature::Formula | Feature::Notes => true,
-            Feature::Paging | Feature::Color | Feature::Underline | Feature::MergedCells | Feature::ImageScale => false,
+            Feature::Paging | Feature::Color | Feature::Underline | Feature::MergedCells | Feature::ImageScale | Feature::ColumnWidths => false,
         }
     }
 
@@ -494,9 +495,13 @@ mod tests {
     use crate::config::DocStyle;
 
     fn md(src: &str) -> String {
+        md_with(src, DocStyle::Gost7_32)
+    }
+
+    fn md_with(src: &str, style: DocStyle) -> String {
         let (p, project, _) = project_of(src);
         let (content, _) = Content::resolve(&p.content, &p.resources);
-        let style = Style::of(DocStyle::Gost7_32);
+        let style = Style::of(style);
         let ctx = PageCtx { res: &p.resources, content: &content, style: &style };
         let page = Markdown.page(&project.docs[0], &ctx).unwrap();
         page.strip_prefix("# Документ\n\n").unwrap().trim_end().to_string()
@@ -530,5 +535,19 @@ mod tests {
         let page = md("а\\*5 б\n\n\\**5 сноска\n\\**0 без ссылки");
         assert_eq!(page, "а[^1]б\n\n[^1]: сноска\n\n[^2]\n\n[^2]: без ссылки");
         assert!(!md("\\=a= \\%КРАС(b)").contains('<'));
+    }
+
+    #[test]
+    fn code_lang_in_fence_only_with_highlight() {
+        let src = "\\//py 0\nprint(1)\n\\//";
+        let modern = md_with(src, DocStyle::Modern);
+        assert!(modern.contains("```py\nprint(1)\n```"), "{modern}");
+        let gost = md(src);
+        assert!(gost.contains("```\nprint(1)\n```"), "{gost}");
+    }
+
+    #[test]
+    fn column_widths_unsupported() {
+        assert!(!Markdown.supports(Feature::ColumnWidths));
     }
 }

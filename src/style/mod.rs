@@ -359,6 +359,7 @@ pub(crate) struct Style {
     pub(crate) code_border: bool,
     /// code line numbers; with a border, the numbers are separated by a line
     pub(crate) code_numbers: bool,
+    pub(crate) highlight_code_syntax: bool,
     pub(crate) table: Role,
     pub(crate) cell: Role,
     pub(crate) head_cell: Role,

@@ -27,7 +27,7 @@ pub(crate) enum BlockKind<'a> {
     Header{level: u8, counter: HeaderCounter},
     Comment,
     Formula(Named<&'a str>),
-    Code(Named<&'a str>),
+    Code { named: Named<&'a str>, lang: Option<&'a str> },
     Image(ImageKind<&'a str>),
     Note
 }
@@ -308,7 +308,7 @@ impl<'a> ClassifiedLine<'a> {
                             return Self {raw, formated, thinned: formated, kind: LineKind::Regular};
                         }
                     }
-                    else if CODE_TAG.is(first_w) {
+                    else if CODE_TAG.strip(first_w).is_some() {
                         return Self { raw, formated, thinned: rest, kind: LineKind::CodeOpen};
                     } else if FORMUAL_TAG.is(first_w) {
                         return Self {raw, formated, thinned: rest, kind: LineKind::FormulaOpen};
@@ -351,6 +351,12 @@ fn search_for_pair(lines: &Vec<ClassifiedLine>, current: &usize, open_kind_opt: 
         }
         t_pos+=1;
     }
+}
+
+fn code_lang(formated: &str) -> Option<&str> {
+    let s = formated.strip_prefix(MARK)?;
+    let first_w = &s[..s.find(is_blank).unwrap_or(s.len())];
+    CODE_TAG.strip(first_w).filter(|lang| !lang.is_empty())
 }
 
 fn resolve_name<'a>(name_line: &'a str) -> Option<&'a str> {
@@ -404,7 +410,7 @@ pub(crate) fn split_blocks_from<'a>(source: &'a str, start: Counters) -> (FlatLe
                     LineKind::CodeOpen => {
                         if search_for_pair(&lines, &current, Some(LineKind::CodeOpen), LineKind::CodeClose) {
                             let named = project.links.register_named(RefKind::Code, Some(line.thinned));
-                            flush(&mut project.blocks, None, BlockKind::Code(named), &mut par_is_open);
+                            flush(&mut project.blocks, None, BlockKind::Code { named, lang: code_lang(line.formated) }, &mut par_is_open);
                             inner_block = OpenBlockKind::Code;
                         } else {
                             inner_block = OpenBlockKind::None;
@@ -951,7 +957,7 @@ use crate::parse::{common::*, block_fragmentation::{FlatLexedProject, InnerProje
             links: InnerProjectLinks { code: refs(&[("aa", 1)]), ..Default::default() },
             blocks: vec![
                 Block {
-                    kind: BlockKind::Code(Named::WithName { name: "aa", index: 1 }),
+                    kind: BlockKind::Code { named: Named::WithName { name: "aa", index: 1 }, lang: None },
                     lines: vec!["bb"]
                 }
             ],
@@ -968,7 +974,7 @@ use crate::parse::{common::*, block_fragmentation::{FlatLexedProject, InnerProje
             links: InnerProjectLinks { code: anon(1), ..Default::default() },
             blocks: vec![
                 Block {
-                    kind: BlockKind::Code(Named::Anonymous{index: 1}),
+                    kind: BlockKind::Code { named: Named::Anonymous{index: 1}, lang: None },
                     lines: vec!["aa"]
                 }
             ],
@@ -985,7 +991,7 @@ use crate::parse::{common::*, block_fragmentation::{FlatLexedProject, InnerProje
             links: InnerProjectLinks { code: refs(&[("aa", 1)]), ..Default::default() },
             blocks: vec![
                 Block {
-                    kind: BlockKind::Code(Named::WithName { name: "aa", index: 1 }),
+                    kind: BlockKind::Code { named: Named::WithName { name: "aa", index: 1 }, lang: None },
                     lines: vec!["\t   bb", "   cc", "", "\tdd"]
                 }
             ],
@@ -1002,7 +1008,7 @@ use crate::parse::{common::*, block_fragmentation::{FlatLexedProject, InnerProje
             links: InnerProjectLinks { code: refs(&[("aa", 1)]), ..Default::default() },
             blocks: vec![
                 Block {
-                    kind: BlockKind::Code(Named::WithName { name: "aa", index: 1 }),
+                    kind: BlockKind::Code { named: Named::WithName { name: "aa", index: 1 }, lang: None },
                     lines: vec!["bb"]
                 }
             ],
@@ -1019,7 +1025,7 @@ use crate::parse::{common::*, block_fragmentation::{FlatLexedProject, InnerProje
             links: InnerProjectLinks { code: refs(&[("aa", 1)]), ..Default::default() },
             blocks: vec![
                 Block {
-                    kind: BlockKind::Code(Named::WithName { name: "aa", index: 1 }),
+                    kind: BlockKind::Code { named: Named::WithName { name: "aa", index: 1 }, lang: None },
                     lines: vec!["bb"]
                 }
             ],
@@ -1062,7 +1068,7 @@ use crate::parse::{common::*, block_fragmentation::{FlatLexedProject, InnerProje
             links: InnerProjectLinks { code: refs(&[("aa", 1)]), ..Default::default() },
             blocks: vec![
                 Block {
-                    kind: BlockKind::Code(Named::WithName { name: "aa", index: 1 }),
+                    kind: BlockKind::Code { named: Named::WithName { name: "aa", index: 1 }, lang: None },
                     lines: vec!["", "bb", "cc"]
                 }
             ],
@@ -1084,13 +1090,101 @@ use crate::parse::{common::*, block_fragmentation::{FlatLexedProject, InnerProje
                     lines: vec![ "bb", "cc"]
                 },
                 Block {
-                    kind: BlockKind::Code(Named::WithName { name: "dd", index: 1 }),
+                    kind: BlockKind::Code { named: Named::WithName { name: "dd", index: 1 }, lang: None },
                     lines: vec!["ee"]
                 }
             ],
             ..Default::default()
         };
         assert_eq!(out, expected);
+    }
+
+    #[test]
+    fn block_check_code_lang() {
+        let source = "\\//py aa\nbb\n\\//";
+        let out = split_blocks(source);
+        let expected = FlatLexedProject {
+            links: InnerProjectLinks { code: refs(&[("aa", 1)]), ..Default::default() },
+            blocks: vec![
+                Block {
+                    kind: BlockKind::Code { named: Named::WithName { name: "aa", index: 1 }, lang: Some("py") },
+                    lines: vec!["bb"]
+                }
+            ],
+            ..Default::default()
+        };
+        assert_eq!(out, expected);
+    }
+
+    #[test]
+    fn block_check_code_lang_anon() {
+        let source = "\\//c++ 0\naa\n\\//";
+        let out = split_blocks(source);
+        let expected = FlatLexedProject {
+            links: InnerProjectLinks { code: anon(1), ..Default::default() },
+            blocks: vec![
+                Block {
+                    kind: BlockKind::Code { named: Named::Anonymous{index: 1}, lang: Some("c++") },
+                    lines: vec!["aa"]
+                }
+            ],
+            ..Default::default()
+        };
+        assert_eq!(out, expected);
+    }
+
+    #[test]
+    fn block_check_code_lang_without_name_is_text() {
+        let source = "\\//py\naa\n\\//";
+        let out = split_blocks(source);
+        let expected = project(vec![
+            Block {
+                kind: BlockKind::Paragraph,
+                lines: vec!["\\//py", "aa"]
+            }
+        ]);
+        assert_eq!(out, expected);
+    }
+
+    #[test]
+    fn block_check_code_lang_not_closed() {
+        let source = "\\//py aa\nbb\ncc";
+        let out = split_blocks(source);
+        let expected = project(vec![
+            Block {
+                kind: BlockKind::Paragraph,
+                lines: vec!["bb", "cc"]
+            }
+        ]);
+        assert_eq!(out, expected);
+    }
+
+    #[test]
+    fn block_check_code_lang_reopen_inside() {
+        let source = "\\// aa\nbb\n\\//rs dd\nee\n\\//";
+        let out = split_blocks(source);
+        let expected = FlatLexedProject {
+            links: InnerProjectLinks { code: refs(&[("dd", 1)]), ..Default::default() },
+            blocks: vec![
+                Block {
+                    kind: BlockKind::Paragraph,
+                    lines: vec!["bb"]
+                },
+                Block {
+                    kind: BlockKind::Code { named: Named::WithName { name: "dd", index: 1 }, lang: Some("rs") },
+                    lines: vec!["ee"]
+                }
+            ],
+            ..Default::default()
+        };
+        assert_eq!(out, expected);
+    }
+
+    #[test]
+    fn block_check_code_lang_name_resolves() {
+        let out = split_blocks("\\//py aa\nbb\n\\//");
+        assert_eq!(out.links.resolve(RefKind::Code, "aa"), Some(1));
+        assert_eq!(out.links.resolve(RefKind::Code, "py aa"), None);
     }
 
     #[test]
@@ -1105,7 +1199,7 @@ use crate::parse::{common::*, block_fragmentation::{FlatLexedProject, InnerProje
                     lines: vec![ "aa"]
                 },
                 Block {
-                    kind: BlockKind::Code(Named::WithName { name: "bb", index: 1 }),
+                    kind: BlockKind::Code { named: Named::WithName { name: "bb", index: 1 }, lang: None },
                     lines: vec!["cc"]
                 },
                 Block {
@@ -2011,7 +2105,7 @@ use crate::parse::{common::*, block_fragmentation::{FlatLexedProject, InnerProje
             links: InnerProjectLinks { code: refs(&[("aa", 1)]), ..Default::default() },
             blocks: vec![
                 Block {
-                    kind: BlockKind::Code(Named::WithName { name: "aa", index: 1 }),
+                    kind: BlockKind::Code { named: Named::WithName { name: "aa", index: 1 }, lang: None },
                     lines: vec!["bb", "\\ //"]
                 }
             ],
@@ -2253,7 +2347,7 @@ use crate::parse::{common::*, block_fragmentation::{FlatLexedProject, InnerProje
                     lines: vec!["\\. aa"]
                 },
                 Block {
-                    kind: BlockKind::Code(Named::WithName { name: "bb", index: 1 }),
+                    kind: BlockKind::Code { named: Named::WithName { name: "bb", index: 1 }, lang: None },
                     lines: vec!["cc"]
                 },
                 Block {
@@ -2676,7 +2770,7 @@ use crate::parse::{common::*, block_fragmentation::{FlatLexedProject, InnerProje
                     lines: vec!["aa"]
                 },
                 Block {
-                    kind: BlockKind::Code(Named::WithName { name: "bb", index: 1 }),
+                    kind: BlockKind::Code { named: Named::WithName { name: "bb", index: 1 }, lang: None },
                     lines: vec!["cc"]
                 }
             ],
@@ -2792,7 +2886,7 @@ use crate::parse::{common::*, block_fragmentation::{FlatLexedProject, InnerProje
             links: InnerProjectLinks { code: refs(&[("aa", 1)]), ..Default::default() },
             blocks: vec![
                 Block {
-                    kind: BlockKind::Code(Named::WithName { name: "aa", index: 1 }),
+                    kind: BlockKind::Code { named: Named::WithName { name: "aa", index: 1 }, lang: None },
                     lines: vec![]
                 }
             ],
@@ -2809,7 +2903,7 @@ use crate::parse::{common::*, block_fragmentation::{FlatLexedProject, InnerProje
             links: InnerProjectLinks { code: refs(&[("aa bb", 1)]), ..Default::default() },
             blocks: vec![
                 Block {
-                    kind: BlockKind::Code(Named::WithName { name: "aa bb", index: 1 }),
+                    kind: BlockKind::Code { named: Named::WithName { name: "aa bb", index: 1 }, lang: None },
                     lines: vec!["cc"]
                 }
             ],
@@ -2839,7 +2933,7 @@ use crate::parse::{common::*, block_fragmentation::{FlatLexedProject, InnerProje
             links: InnerProjectLinks { code: refs(&[("aa", 1)]), ..Default::default() },
             blocks: vec![
                 Block {
-                    kind: BlockKind::Code(Named::WithName { name: "aa", index: 1 }),
+                    kind: BlockKind::Code { named: Named::WithName { name: "aa", index: 1 }, lang: None },
                     lines: vec!["\\+ bb", "\\\"", "\\$ cc", "\\$", "\\№ dd", "\\. ee", "\\**1 ff", "\\(gg, hh)"]
                 }
             ],
@@ -2856,7 +2950,7 @@ use crate::parse::{common::*, block_fragmentation::{FlatLexedProject, InnerProje
             links: InnerProjectLinks { code: refs(&[("aa", 1)]), ..Default::default() },
             blocks: vec![
                 Block {
-                    kind: BlockKind::Code(Named::WithName { name: "aa", index: 1 }),
+                    kind: BlockKind::Code { named: Named::WithName { name: "aa", index: 1 }, lang: None },
                     lines: vec!["\\$ bb", "cc"]
                 }
             ],
@@ -2873,7 +2967,7 @@ use crate::parse::{common::*, block_fragmentation::{FlatLexedProject, InnerProje
             links: InnerProjectLinks { code: refs(&[("aa", 1)]), ..Default::default() },
             blocks: vec![
                 Block {
-                    kind: BlockKind::Code(Named::WithName { name: "aa", index: 1 }),
+                    kind: BlockKind::Code { named: Named::WithName { name: "aa", index: 1 }, lang: None },
                     lines: vec!["bb", "", "cc"]
                 }
             ],
@@ -3308,7 +3402,7 @@ use crate::parse::{common::*, block_fragmentation::{FlatLexedProject, InnerProje
     fn block_check_code_trailing_blanks_trimmed() {
         let out = split_blocks("\\// 0\n    fn a() {  \t\n\n}\t\n\\//");
         assert_eq!(out.blocks, vec![Block {
-            kind: BlockKind::Code(Named::Anonymous{index: 1}),
+            kind: BlockKind::Code { named: Named::Anonymous{index: 1}, lang: None },
             lines: vec!["    fn a() {", "", "}"]
         }]);
     }

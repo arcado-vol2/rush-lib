@@ -359,7 +359,8 @@ impl Writer<'_> {
                 escape(out, number)?;
                 out.write_str("</div></div>")
             }
-            Block::Code { caption, lines, anchor } => {
+            // TODO: add support with syntect
+            Block::Code { caption, lines, anchor, lang: _lang } => {
                 write!(out, "<div class=\"code\" id=\"{}\">", anchor.id())?;
                 self.captioned(out, caption, |out| {
                     out.write_str("<div class=\"body\">")?;
@@ -379,10 +380,19 @@ impl Writer<'_> {
                 })?;
                 out.write_str("</div>")
             }
-            Block::Table { caption, aligns, head, body, anchor, .. } => {
+            Block::Table { caption, aligns, widths, head, body, anchor, .. } => {
                 write!(out, "<div class=\"table\" id=\"{}\">", anchor.id())?;
                 self.captioned(out, caption, |out| {
-                    out.write_str("<table>")?;
+                    match widths {
+                        Some(widths) => {
+                            out.write_str("<table style=\"table-layout: fixed\"><colgroup>")?;
+                            for w in widths {
+                                write!(out, "<col style=\"width: {:.2}%\">", w * 100.0)?;
+                            }
+                            out.write_str("</colgroup>")?;
+                        }
+                        None => out.write_str("<table>")?,
+                    }
                     if !head.is_empty() {
                         let head_aligns = vec![style.head_cell.align; aligns.len()];
                         out.write_str("<thead>")?;

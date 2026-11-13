@@ -78,6 +78,7 @@ pub(super) fn style() -> Style {
         code_frame: Frame { border: 0.75, pad_x: 6.0, pad_y: 4.0},
         code_border: true,
         code_numbers: false,
+        highlight_code_syntax: false,
         table: Role { min_first: 1, min_last: 1, ..around(LH / 2.0) },
         cell: small,
         head_cell: Role { align: Align::Center, ..small },

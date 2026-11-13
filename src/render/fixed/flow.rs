@@ -383,9 +383,9 @@ impl Flow {
                 ir::Block::Formula { name, mathml, src, number, anchor } => {
                     self.formula(name.as_deref(), mathml.as_deref(), src, number, anchor, ctx, file, warn)
                 }
-                ir::Block::Code { caption, lines, anchor } => self.code(caption, lines, anchor, ctx, file, warn),
-                ir::Block::Table { caption, cont, aligns, head, body, anchor } => {
-                    self.table(caption, cont, aligns, head, body, anchor, ctx, file, warn)
+                ir::Block::Code { caption, lines, anchor, lang: _lang } => self.code(caption, lines, anchor, ctx, file, warn),
+                ir::Block::Table { caption, cont, aligns, widths, head, body, anchor } => {
+                    self.table(caption, cont, aligns, widths.as_deref(), head, body, anchor, ctx, file, warn)
                 }
                 ir::Block::Notes(defs) => for def in defs {
                     self.note_body(def, ctx, file, warn);
@@ -561,7 +561,7 @@ impl Flow {
     }
 
     #[allow(clippy::too_many_arguments)]
-    fn table(&mut self, caption: &Caption, cont: &str, aligns: &[Align], head: &[Vec<Cell>], body: &[Vec<Cell>], anchor: &Anchor, ctx: &Ctx, file: &str, warn: &mut Warn) {
+    fn table(&mut self, caption: &Caption, cont: &str, aligns: &[Align], shares: Option<&[f32]>, head: &[Vec<Cell>], body: &[Vec<Cell>], anchor: &Anchor, ctx: &Ctx, file: &str, warn: &mut Warn) {
         let st = ctx.style;
         let cols = aligns.len();
         let tw = ctx.width(&st.table);
@@ -575,7 +575,10 @@ impl Flow {
         let head_cells = Table::cells(ctx, head, &st.head_cell, file, warn);
         let body_cells = Table::cells(ctx, body, &st.cell, file, warn);
         let all: Vec<&Vec<LCell>> = head_cells.iter().chain(&body_cells).collect();
-        let widths = Table::column_widths(&all, cols, extra_w, st.cell.size, tw);
+        let widths = match shares {
+            Some(shares) => shares.iter().map(|s| s * tw).collect(),
+            None => Table::column_widths(&all, cols, extra_w, st.cell.size, tw),
+        };
         let mut xs = vec![0.0];
         for w in &widths {
             xs.push(xs.last().unwrap() + w);

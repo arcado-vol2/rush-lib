@@ -9,6 +9,7 @@ pub enum Feature {
     Underline,
     Strike,
     MergedCells,
+    ColumnWidths,
     ImageScale,
     Formula,
     Notes,

@@ -132,6 +132,7 @@ pub(crate) struct Formula<'a> {
 #[derive(Debug)]
 pub(crate) struct Code<'a> {
     pub(crate) named: Named<Vec<Span<'a>>>,
+    pub(crate) lang: Option<&'a str>,
     pub(crate) content: Vec<&'a str>
 }
 #[derive(Debug)]
@@ -261,6 +262,7 @@ pub(crate) struct Table<'a> {
     pub(crate) named: Named<Vec<Span<'a>>>,
     pub(crate) headers: Vec<Vec<TableEl<'a>>>,
     pub(crate) aligments: Vec<Aligment>,
+    pub(crate) widths: Option<Vec<f32>>,
     pub(crate) cells: Vec<Vec<TableEl<'a>>>,
 }
 impl<'a> Table<'a> {
@@ -276,8 +278,8 @@ impl<'a> Table<'a> {
         let columns = headers.iter().map(Vec::len).max().unwrap_or(0);
         Self::normalize(&mut headers, columns);
         Self::normalize(&mut cells, columns);
-        let aligments = Self::parse_aligments(TABLE_FUL_SEP.strip(lines[sep]).unwrap(), columns);
-        Self { named, headers, aligments, cells }
+        let (aligments, widths) = Self::parse_format(TABLE_FUL_SEP.strip(lines[sep]).unwrap(), columns);
+        Self { named, headers, aligments, widths, cells }
     }
 
     /// Pads/truncates rows to `columns` and replaces impossible merges with empty cells
@@ -299,7 +301,7 @@ impl<'a> Table<'a> {
     }
 
     /// `rest` - everything after `\№-`, outer `/` are optional
-    fn parse_aligments(rest: &str, columns: usize) -> Vec<Aligment> {
+    fn parse_format(rest: &str, columns: usize) -> (Vec<Aligment>, Option<Vec<f32>>) {
         let rest = rest.trim_matches(is_blank);
         let mut pieces = split_table_cells(rest);
         if rest.ends_with(TABLE_SEP) {
@@ -309,15 +311,49 @@ impl<'a> Table<'a> {
             pieces.remove(0);
         }
         let mut pieces = pieces.into_iter();
-        (0..columns).map(|_| {
-            let mut chars = pieces.next().unwrap_or("").chars();
-            match (chars.next().and_then(|c| c.to_uppercase().next()), chars.next()) {
-                (Some(TABLE_LEFT), None) => Aligment::Left,
-                (Some(TABLE_RIGHT), None) => Aligment::Right,
-                (Some(TABLE_CENTER), None) => Aligment::Center,
-                _ => Aligment::default()
+        let (aligments, weights): (Vec<Aligment>, Vec<Option<u32>>) = (0..columns)
+            .map(|_| Self::parse_format_piece(pieces.next().unwrap_or("")))
+            .unzip();
+        (aligments, Self::normalize_weights(&weights))
+    }
+
+    fn parse_format_piece(piece: &str) -> (Aligment, Option<u32>) {
+        let digit = |c: char| c.is_ascii_digit();
+        let head = piece.trim_start_matches(digit);
+        let (letter, number) = if head.len() != piece.len() {
+            (head, &piece[..piece.len() - head.len()])
+        } else {
+            let tail = piece.trim_end_matches(digit);
+            (tail, &piece[tail.len()..])
+        };
+        let weight = if number.is_empty() {
+            None
+        } else {
+            match number.parse::<u32>() {
+                Ok(n) if n > 0 => Some(n),
+                _ => return (Aligment::default(), None)
             }
-        }).collect()
+        };
+        let mut chars = letter.chars();
+        let aligment = match (chars.next().and_then(|c| c.to_uppercase().next()), chars.next()) {
+            (None, _) => Aligment::default(),
+            (Some(TABLE_LEFT), None) => Aligment::Left,
+            (Some(TABLE_RIGHT), None) => Aligment::Right,
+            (Some(TABLE_CENTER), None) => Aligment::Center,
+            _ => return (Aligment::default(), None)
+        };
+        (aligment, weight)
+    }
+
+    fn normalize_weights(weights: &[Option<u32>]) -> Option<Vec<f32>> {
+        let given: Vec<f64> = weights.iter().flatten().map(|&w| w as f64).collect();
+        if given.is_empty() {
+            return None;
+        }
+        let avg = given.iter().sum::<f64>() / given.len() as f64;
+        let full: Vec<f64> = weights.iter().map(|w| w.map_or(avg, |w| w as f64)).collect();
+        let total: f64 = full.iter().sum();
+        Some(full.into_iter().map(|w| (w / total) as f32).collect())
     }
 
     fn parse_table_line(line: &'a str, outer_links: &Resources, inner_links: &InnerProjectLinks) -> Vec<TableEl<'a>> {
@@ -377,9 +413,10 @@ impl<'a> Node<'a> {
                 }).collect();
                 Self::Note(Note { content })
             },
-            BlockKind::Code(name) => {
+            BlockKind::Code { named, lang } => {
                 Self::Code(Code {
-                    named: name.map(|s| parse_generic_block(vec![s], InlineContext::Name, outer_links, inner_links)),
+                    named: named.map(|s| parse_generic_block(vec![s], InlineContext::Name, outer_links, inner_links)),
+                    lang,
                     content: block.lines
                 })
             },
@@ -450,6 +487,7 @@ impl<'a> fmt::Debug for Node<'a> {
 
             Node::Code(v) => f.debug_struct("Code")
                 .field("named", &v.named)
+                .field("lang", &v.lang)
                 .field("content", &Lines(&v.content))
                 .finish(),
 
@@ -622,6 +660,99 @@ impl<'a> Rush<'a> {
         assert_eq!(table("\\№ 0\n/ a / b / c / d /\n\\№- Л / ц / X /\n\\№").2, vec!["Left", "Center", "Center", "Center"]);
         assert_eq!(table("\\№ 0\n/ a / b /\n\\№- / П / Л / Л /\n\\№").2, vec!["Right", "Left"]);
         assert_eq!(table("\\№ 0\n/ a / b /\n\\№- п\n\\№").2, vec!["Right", "Center"]);
+    }
+
+    fn table_widths(source: &str) -> Option<Vec<f32>> {
+        let gp = empty_gp();
+        let out = Rush::new(source, &gp);
+        match &out.nodes[..] {
+            [Node::Table(t)] => t.widths.clone(),
+            other => panic!("{other:?}")
+        }
+    }
+
+    fn assert_widths(source: &str, expected: &[f32]) {
+        let got = table_widths(source).unwrap_or_else(|| panic!("{source}"));
+        assert_eq!(got.len(), expected.len(), "{source}: {got:?}");
+        for (g, e) in got.iter().zip(expected) {
+            assert!((g - e).abs() < 1e-4, "{source}: {got:?} != {expected:?}");
+        }
+    }
+
+    const T2: &str = "\\№ 0\n/ a / b /\n";
+    const T3: &str = "\\№ 0\n/ a / b / c /\n";
+    const T4: &str = "\\№ 0\n/ a / b / c / d /\n";
+
+    #[test]
+    fn table_widths_user_example() {
+        let src = format!("{T4}\\№- / Ц100 / 200 / Ц / 50Ц /\n\\№");
+        let avg = 350.0 / 3.0;
+        let total = 350.0 + avg;
+        assert_widths(&src, &[100.0 / total, 200.0 / total, avg / total, 50.0 / total]);
+        assert_eq!(table(&src).2, vec!["Center"; 4]);
+    }
+
+    #[test]
+    fn table_widths_number_on_both_sides() {
+        let src = format!("{T2}\\№- 30Л / П70\n\\№");
+        assert_widths(&src, &[0.3, 0.7]);
+        assert_eq!(table(&src).2, vec!["Left", "Right"]);
+    }
+
+    #[test]
+    fn table_widths_case_insensitive() {
+        let src = format!("{T2}\\№- л25 / 75п\n\\№");
+        assert_widths(&src, &[0.25, 0.75]);
+        assert_eq!(table(&src).2, vec!["Left", "Right"]);
+    }
+
+    #[test]
+    fn table_widths_only_numbers() {
+        let src = format!("{T2}\\№- 1 / 3\n\\№");
+        assert_widths(&src, &[0.25, 0.75]);
+        assert_eq!(table(&src).2, vec!["Center", "Center"]);
+    }
+
+    #[test]
+    fn table_widths_absent() {
+        assert_eq!(table_widths(&format!("{T2}\\№- Л / Ц\n\\№")), None);
+        assert_eq!(table_widths(&format!("{T2}\\№-\n\\№")), None);
+        assert_eq!(table(&format!("{T2}\\№- Л / Ц\n\\№")).2, vec!["Left", "Center"]);
+    }
+
+    #[test]
+    fn table_widths_fewer_pieces_than_columns() {
+        assert_widths(&format!("{T3}\\№- 100\n\\№"), &[1.0 / 3.0; 3]);
+    }
+
+    #[test]
+    fn table_widths_extra_pieces_ignored() {
+        assert_widths(&format!("{T2}\\№- 10 / 30 / 1000\n\\№"), &[0.25, 0.75]);
+    }
+
+    #[test]
+    fn table_widths_invalid_pieces() {
+        for bad in ["0Ц", "Ц 10", "10Ц20", "Ц10Л", "X5", "ЦЛ10"] {
+            let src = format!("{T2}\\№- {bad} / 40\n\\№");
+            assert_widths(&src, &[0.5, 0.5]);
+            assert_eq!(table(&src).2, vec!["Center", "Center"], "{bad}");
+        }
+        assert_eq!(table_widths(&format!("{T2}\\№- 0 / Л0\n\\№")), None);
+    }
+
+    #[test]
+    fn code_lang_in_node() {
+        let out = Rush::new("\\//py Пример\nprint(1)\n\\//", &empty_gp());
+        match &out.nodes[..] {
+            [Node::Code(c)] => {
+                assert_eq!(c.lang, Some("py"));
+                assert_eq!(c.content, vec!["print(1)"]);
+                assert!(matches!(c.named, Named::WithName { .. }));
+            }
+            other => panic!("{other:?}")
+        }
+        let out = Rush::new("\\// Пример\nx\n\\//", &empty_gp());
+        assert!(matches!(&out.nodes[..], [Node::Code(Code { lang: None, .. })]), "{out:?}");
     }
 
     #[test]
