@@ -1,4 +1,4 @@
-use crate::config::{DocOut, DocStyle};
+use crate::config::{DocOut, DocStyle, Theme};
 use crate::parse::common::RefKind;
 
 
@@ -17,11 +17,8 @@ pub enum Feature {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Origin {
-    /// the source refers to something missing or has an error
     Content,
-    /// the style cannot format something in the source
     Style(DocStyle),
-    /// the output format cannot express something in the source
     Backend(DocOut),
 }
 
@@ -36,6 +33,7 @@ pub enum RenderWarningKind {
     ImageSizeUnknown(String),
     BlockTallerThanPage,
     Unsupported(Feature),
+    UnsupportedTheme(Theme),
 }
 
 #[derive(Debug, Clone, PartialEq)]

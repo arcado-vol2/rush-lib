@@ -1,4 +1,4 @@
-use crate::config::{Config, DocOut};
+use crate::config::{Config, DocOut, Theme};
 use crate::content::Content;
 use crate::parse::block_fragmentation::Counters;
 use crate::parse::rush::Rush;
@@ -126,9 +126,25 @@ fn content_sources<'a>(content: &'a Content, res: &'a Resources) -> Vec<ir::Sour
     for item in &content.items {
         let rush = Rush::new_from(res.files.data(item.file), res, counters);
         counters = rush.counters;
-        sources.push(ir::Source { file: item.file, title: &item.name, rush });
+        sources.push(ir::Source { file: item.file, title: &item.heading, rush });
     }
     sources
+}
+
+fn theme(config: &Config, style: &Style, backend: &Backend, warn: &mut Vec<RenderWarning>) -> Theme {
+    let unsupported = |origin, warn: &mut Vec<RenderWarning>| {
+        warn.push(RenderWarning { origin, file: None, kind: RenderWarningKind::UnsupportedTheme(config.theme) });
+        Theme::Light
+    };
+    match (config.theme, backend) {
+        (Theme::Light, _) => Theme::Light,
+        (Theme::Auto, Backend::Semantic(_)) if config.out == DocOut::Markdown || style.dark.is_none() => Theme::Light,
+        (Theme::Dark, _) if config.out == DocOut::Markdown => unsupported(Origin::Backend(config.out), warn),
+        (Theme::Dark, _) if style.dark.is_none() => unsupported(Origin::Style(style.name), warn),
+        (Theme::Auto, Backend::Fixed(_)) if style.dark.is_none() => Theme::Light,
+        (Theme::Auto, Backend::Fixed(b)) => unsupported(Origin::Backend(b.out()), warn),
+        (theme, _) => theme,
+    }
 }
 
 fn check_all(ir: &ir::Project, res: &Resources, style: &Style, backend: &Backend, warn: &mut Vec<RenderWarning>) {
@@ -145,18 +161,20 @@ pub(crate) fn build(config: &Config, project: &Project, content: &Content) -> Re
     let backend = Backend::of(config);
     let res = &project.resources;
     let mut warn = Vec::new();
+    let theme = theme(config, &style, &backend, &mut warn);
+    let scripts = !config.no_js;
     let mut files = font_files(&style);
     match &backend {
         Backend::Semantic(b) if config.single => {
             files.extend(b.assets(&style));
-            let ctx = semantic::PageCtx { res, content, style: &style };
+            let ctx = semantic::PageCtx { res, content, style: &style, theme, scripts };
             let ir = ir::build(content_sources(content, res), &style, res, &mut warn);
             check_all(&ir, res, &style, &backend, &mut warn);
             files.push(OutFile { path: format!("index.{}", b.ext()), data: b.joined(&ir, &ctx)?.into_bytes() });
         }
         Backend::Semantic(b) => {
             files.extend(b.assets(&style));
-            let ctx = semantic::PageCtx { res, content, style: &style };
+            let ctx = semantic::PageCtx { res, content, style: &style, theme, scripts };
             for (id, local, text) in res.files.iter() {
                 let stem = local.file_stem().unwrap_or_default().to_string_lossy();
                 let title = content.title_for(id).unwrap_or(&stem);
@@ -168,6 +186,9 @@ pub(crate) fn build(config: &Config, project: &Project, content: &Content) -> Re
             }
         }
         Backend::Fixed(b) => {
+            if let (Theme::Dark, Some(dark)) = (theme, style.dark) {
+                style = Style { non_russian: style.non_russian, ..dark() };
+            }
             let geometry = geometry(&style, &mut warn);
             let ir = ir::build(content_sources(content, res), &style, res, &mut warn);
             check_all(&ir, res, &style, &backend, &mut warn);
@@ -188,7 +209,7 @@ mod tests {
         let mut p = Project::new();
         p.add_file("a", "a.rush", "\\++ Раздел\n\nтекст\\*1\n\n\\**1 сноска".into()).unwrap();
         p.add_content("Документ".into(), "a".into());
-        let (content, _) = Content::resolve(&p.content, &p.resources);
+        let (content, _) = Content::resolve(&p.content, &p.dirs, &p.resources);
         (p, content)
     }
 
@@ -199,9 +220,9 @@ mod tests {
     #[test]
     fn same_style_two_backends() {
         let (p, content) = project();
-        let html = build(&Config { style: DocStyle::Gost7_32, out: DocOut::Html, single: false }, &p, &content).unwrap();
+        let html = build(&Config { style: DocStyle::Gost7_32, out: DocOut::Html, single: false, ..Config::default() }, &p, &content).unwrap();
         assert_eq!(paths(&html.0), vec!["style.css", "a.html"]);
-        let paged = build(&Config { style: DocStyle::Gost7_32, out: DocOut::Html, single: true }, &p, &content).unwrap();
+        let paged = build(&Config { style: DocStyle::Gost7_32, out: DocOut::Html, single: true, ..Config::default() }, &p, &content).unwrap();
         assert_eq!(paths(&paged.0), vec!["style.css", "index.html"]);
         assert!(html.1.is_empty() && paged.1.is_empty(), "{:?} {:?}", html.1, paged.1);
 
@@ -222,18 +243,18 @@ mod tests {
         p.add_file("two", "two.rush", "\\++ Второй\n\nещё\\*1\n\n\\**1 другая".into()).unwrap();
         p.add_content("Второй файл".into(), "two".into());
         p.add_content("Первый файл".into(), "b/one".into());
-        let (content, _) = Content::resolve(&p.content, &p.resources);
+        let (content, _) = Content::resolve(&p.content, &p.dirs, &p.resources);
         (p, content)
     }
 
     #[test]
     fn markdown_single_is_one_file_in_content_order() {
         let (p, content) = two_docs();
-        let config = Config { style: DocStyle::Gost7_32, out: DocOut::Markdown, single: true };
+        let config = Config { style: DocStyle::Gost7_32, out: DocOut::Markdown, single: true, ..Config::default() };
         let (files, _) = build(&config, &p, &content).unwrap();
         assert_eq!(paths(&files), vec!["index.md"]);
         let md = text_of(&files, "index.md");
-        let (second, first) = (md.find("# Второй файл").unwrap(), md.find("# Первый файл").unwrap());
+        let (second, first) = (md.find("# Второй файл").unwrap(), md.find("# b; Первый файл").unwrap());
         assert!(second < first, "{md}");
         assert!(md.contains("[^1]: другая") && md.contains("[^2]: сноска"), "{md}");
         assert!(md.contains("## 1 Второй") && md.contains("## 2 Раздел Rust"), "{md}");
@@ -247,11 +268,11 @@ mod tests {
     #[test]
     fn non_russian_only_outside_markdown() {
         let (p, content) = two_docs();
-        let md = build(&Config { style: DocStyle::Gost7_32, out: DocOut::Markdown, single: false }, &p, &content).unwrap();
+        let md = build(&Config { style: DocStyle::Gost7_32, out: DocOut::Markdown, single: false, ..Config::default() }, &p, &content).unwrap();
         assert!(text_of(&md.0, "b/one.md").contains("Раздел Rust"));
-        let html = build(&Config { style: DocStyle::Gost7_32, out: DocOut::Html, single: false }, &p, &content).unwrap();
+        let html = build(&Config { style: DocStyle::Gost7_32, out: DocOut::Html, single: false, ..Config::default() }, &p, &content).unwrap();
         assert!(text_of(&html.0, "b/one.html").contains("<i><span class=\"mono\">Rust</span></i>"));
-        let paged = build(&Config { style: DocStyle::Gost7_32, out: DocOut::Html, single: true }, &p, &content).unwrap();
+        let paged = build(&Config { style: DocStyle::Gost7_32, out: DocOut::Html, single: true, ..Config::default() }, &p, &content).unwrap();
         assert_eq!(text_of(&paged.0, "index.html").matches("<span class=\"mono\">Rust</span>").count(), 2);
     }
 
@@ -260,11 +281,66 @@ mod tests {
         let mut p = Project::new();
         p.add_file("a", "a.rush", "текст".into()).unwrap();
         p.add_content("Про Rust".into(), "a".into());
-        let (content, _) = Content::resolve(&p.content, &p.resources);
-        let (files, _) = build(&Config { style: DocStyle::Gost7_32, out: DocOut::Html, single: false }, &p, &content).unwrap();
+        let (content, _) = Content::resolve(&p.content, &p.dirs, &p.resources);
+        let (files, _) = build(&Config { style: DocStyle::Gost7_32, out: DocOut::Html, single: false, ..Config::default() }, &p, &content).unwrap();
         let page = text_of(&files, "a.html");
         assert!(page.contains("<title>Про Rust</title>"), "{page}");
-        assert!(page.contains("<header class=\"title\">Про <i><span class=\"mono\">Rust</span></i></header>"), "{page}");
+        assert!(page.contains("<header class=\"title\"><span class=\"name\">Про <i><span class=\"mono\">Rust</span></i></span></header>"), "{page}");
+    }
+
+    #[test]
+    fn theme_warnings() {
+        use crate::config::Theme::{Auto, Dark};
+        let (p, content) = project();
+        let warns = |style, out, single, theme| build(&Config { style, out, single, theme, ..Config::default() }, &p, &content).unwrap().1;
+        let unsupported = |origin, theme| vec![RenderWarning { origin, file: None, kind: RenderWarningKind::UnsupportedTheme(theme) }];
+        assert_eq!(warns(DocStyle::Gost7_32, DocOut::Html, false, Dark), unsupported(Origin::Style(DocStyle::Gost7_32), Dark));
+        assert_eq!(warns(DocStyle::Modern, DocOut::Html, true, Dark), unsupported(Origin::Style(DocStyle::Modern), Dark));
+        assert_eq!(warns(DocStyle::Blog, DocOut::Markdown, false, Dark), unsupported(Origin::Backend(DocOut::Markdown), Dark));
+        assert_eq!(warns(DocStyle::Blog, DocOut::Html, true, Auto), unsupported(Origin::Backend(DocOut::Html), Auto));
+        for (style, out, single, theme) in [
+            (DocStyle::Gost7_32, DocOut::Html, true, Auto),
+            (DocStyle::Modern, DocOut::Html, false, Auto),
+            (DocStyle::Gost7_32, DocOut::Markdown, false, Auto),
+            (DocStyle::Blog, DocOut::Html, false, Auto),
+            (DocStyle::Blog, DocOut::Html, false, Dark),
+            (DocStyle::Blog, DocOut::Html, true, Dark),
+        ] {
+            assert_eq!(warns(style, out, single, theme), vec![], "{style:?} {out:?} {single} {theme:?}");
+        }
+    }
+
+    #[test]
+    fn blog_single_dark_paints_dark_pages() {
+        let (p, content) = project();
+        let config = Config { style: DocStyle::Blog, out: DocOut::Html, single: true, theme: crate::config::Theme::Dark, ..Config::default() };
+        let (files, _) = build(&config, &p, &content).unwrap();
+        assert!(text_of(&files, "style.css").contains("--paper: #141617"));
+    }
+
+    #[test]
+    fn markdown_single_heads_with_opened_dirs() {
+        let mut p = Project::new();
+        for path in ["a/b.rush", "a/c.rush", "x.rush"] {
+            p.add_file(path, path, "текст".into()).unwrap();
+        }
+        for (name, key) in [("B", "a/b"), ("C", "a/c"), ("X", "x")] {
+            p.add_content(name.into(), key.into());
+        }
+        p.add_dir("A".into(), "a".into());
+        let (content, _) = Content::resolve(&p.content, &p.dirs, &p.resources);
+        let config = Config { style: DocStyle::Blog, out: DocOut::Markdown, single: true, ..Config::default() };
+        let (files, _) = build(&config, &p, &content).unwrap();
+        let md = text_of(&files, "index.md");
+        assert!(md.starts_with("# A; B
+
+текст
+
+# C
+
+текст
+
+# X"), "{md}");
     }
 
     #[test]

@@ -3,6 +3,7 @@ use crate::render::Feature;
 use crate::render::ir::CaptionKind;
 use crate::color::Color;
 
+mod blog;
 mod gost;
 mod modern;
 
@@ -201,6 +202,7 @@ pub(crate) struct Caption {
     pub(crate) role: Role,
     /// caption after the content; before it by default
     pub(crate) caption_after: bool,
+    pub(crate) index_color: Option<Color>,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -273,6 +275,38 @@ pub(crate) struct TitleBar {
     /// no color - the page color
     pub(crate) bg: Option<Color>,
     pub(crate) color: Option<Color>,
+    pub(crate) size: Option<f32>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum DirCase {
+    Plain,
+    Upper,
+    SmallCaps,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct Chrome {
+    pub(crate) paper: Color,
+    pub(crate) ink: Color,
+    pub(crate) line: Color,
+    pub(crate) nav_bg: Color,
+    pub(crate) nav_color: Color,
+    pub(crate) nav_current_bg: Option<Color>,
+    pub(crate) nav_current_color: Color,
+    pub(crate) nav_current_bar: Color,
+    pub(crate) nav_current_bold: bool,
+    pub(crate) nav_dir: Color,
+    pub(crate) dir_case: DirCase,
+    pub(crate) accent: Color,
+    pub(crate) nav_title: Option<&'static str>,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct Screen {
+    pub(crate) column: f32,
+    /// top, right, bottom, left
+    pub(crate) pad: [f32; 4],
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -336,10 +370,17 @@ pub(crate) struct Style {
     pub(crate) non_russian: Option<Font>,
     pub(crate) title_bar: TitleBar,
     pub(crate) ext_link: ExtLink,
+    pub(crate) chrome: Chrome,
+    pub(crate) screen: Screen,
+    pub(crate) dark: Option<fn() -> Style>,
+    pub(crate) nav_toggle: bool,
+    pub(crate) theme_toggle: bool,
+    pub(crate) page_toc: bool,
 
     pub(crate) body: Role,
     pub(crate) comment: Role,
     pub(crate) comment_prefix: Option<&'static str>,
+    pub(crate) comment_bar: Option<Color>,
     pub(crate) doc_title: Role,
     pub(crate) headers: [Role; 5],
     pub(crate) numbering: Numbering,
@@ -359,6 +400,7 @@ pub(crate) struct Style {
     pub(crate) code_border: bool,
     /// code line numbers; with a border, the numbers are separated by a line
     pub(crate) code_numbers: bool,
+    pub(crate) code_radius: f32,
     pub(crate) highlight_code_syntax: bool,
     pub(crate) table: Role,
     pub(crate) cell: Role,
@@ -374,7 +416,7 @@ impl Style {
         match name {
             DocStyle::Gost7_32 => gost::style(),
             DocStyle::Modern => modern::style(),
-            _ => unimplemented!("not yet"),
+            DocStyle::Blog => blog::style(),
         }
     }
 

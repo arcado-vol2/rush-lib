@@ -88,9 +88,10 @@ fn css(style: &Style, layout: &Layout) -> String {
     let mut out = css_fonts(style, "fonts");
     let _ = write!(out, "@page {{ size: {}pt {}pt; margin: 0; }}\n", g.width, g.height);
     let _ = write!(out, ":root {{ --page-w: {}pt; --page-h: {}pt; --m-top: {}pt; --m-left: {}pt; --text-w: {}pt; --text-h: {}pt; \
-        --body: \"{}\", {}; --mono: \"{}\", {}; }}\n",
+        --body: \"{}\", {}; --mono: \"{}\", {}; --paper: {}; --ink: {}; }}\n",
         g.width, g.height, g.top, g.left, g.text_w(), g.text_h(),
-        style.fonts.body.name, style.fonts.body.fallback, style.fonts.mono.name, style.fonts.mono.fallback);
+        style.fonts.body.name, style.fonts.body.fallback, style.fonts.mono.name, style.fonts.mono.fallback,
+        style.chrome.paper.to_hex_tag(), style.chrome.ink.to_hex_tag());
     out.push_str(BASE_CSS);
     out
 }

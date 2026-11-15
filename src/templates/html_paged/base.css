@@ -8,7 +8,7 @@ html {
 }
 body {
   margin: 0;
-  color: #000;
+  color: var(--ink);
   font-family: var(--body);
   font-kerning: none;
   font-variant-ligatures: none;
@@ -22,7 +22,7 @@ body {
   width: var(--page-w);
   height: var(--page-h);
   overflow: hidden;
-  background: #fff;
+  background: var(--paper);
   break-after: page;
 }
 .page:last-child { break-after: auto; }
@@ -37,8 +37,8 @@ body {
 .content > * { position: absolute; margin: 0; }
 
 .l { white-space: pre; }
-.rule { background: #000; }
-.leader { height: 0; border-bottom: 1.5pt dotted #000; }
+.rule { background: var(--ink); }
+.leader { height: 0; border-bottom: 1.5pt dotted var(--ink); }
 .anchor { width: 0; height: 0; }
 .math { display: flex; align-items: center; justify-content: center; }
 

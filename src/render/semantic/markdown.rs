@@ -500,9 +500,9 @@ mod tests {
 
     fn md_with(src: &str, style: DocStyle) -> String {
         let (p, project, _) = project_of(src);
-        let (content, _) = Content::resolve(&p.content, &p.resources);
+        let (content, _) = Content::resolve(&p.content, &p.dirs, &p.resources);
         let style = Style::of(style);
-        let ctx = PageCtx { res: &p.resources, content: &content, style: &style };
+        let ctx = PageCtx { res: &p.resources, content: &content, style: &style, theme: crate::config::Theme::Light, scripts: true };
         let page = Markdown.page(&project.docs[0], &ctx).unwrap();
         page.strip_prefix("# Документ\n\n").unwrap().trim_end().to_string()
     }

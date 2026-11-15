@@ -9,7 +9,7 @@ mod content;
 mod project;
 mod color;
 
-pub use config::{Config, DocOut, DocStyle};
+pub use config::{Config, DocOut, DocStyle, Theme};
 pub use project::{Project, ProjectWarning};
 pub use render::{Feature, Origin, RenderWarning, RenderWarningKind};
 pub use parse::common::RefKind;
@@ -41,7 +41,7 @@ pub struct OutFile {
 }
 
 pub fn build(config: &Config, project: &Project) -> Result<(Vec<OutFile>, Vec<Warning>), fmt::Error> {
-    let (content, content_warns) = Content::resolve(&project.content, &project.resources);
+    let (content, content_warns) = Content::resolve(&project.content, &project.dirs, &project.resources);
     let mut warns: Vec<Warning> = content_warns.into_iter().map(Warning::from).collect();
     if config.single {
         for (id, local, _) in project.resources.files.iter() {
@@ -68,7 +68,7 @@ mod tests {
         let not_in_content = vec![Warning::Project(ProjectWarning::NotInContent("b.rush".into()))];
 
         for out in [DocOut::Html, DocOut::Markdown] {
-            let (_, warns) = build(&Config { out, single: true, ..Config::default() }, &p).unwrap();
+            let (_, warns) = build(&Config { out, single: true, theme: Theme::Light, ..Config::default() }, &p).unwrap();
             assert_eq!(warns, not_in_content);
             let (_, warns) = build(&Config { out, single: false, ..Config::default() }, &p).unwrap();
             assert!(warns.is_empty(), "{warns:?}");

@@ -1,6 +1,6 @@
 use std::{fs, io, path::{Component, Path, PathBuf}};
 
-use crate::content::ContentEntry;
+use crate::content::{ContentEntry, DirEntry};
 use crate::resources::{FILE_EXTENSIONS, IMG_EXTENSIONS, Resources};
 
 #[derive(Debug, Clone, PartialEq)]
@@ -16,6 +16,7 @@ pub enum ProjectWarning {
 pub struct Project {
     pub(crate) resources: Resources,
     pub(crate) content: Vec<ContentEntry>,
+    pub(crate) dirs: Vec<DirEntry>,
 }
 
 impl Project {
@@ -35,11 +36,16 @@ impl Project {
         self.content.push(ContentEntry { name, key });
     }
 
+    /// `key` - dir path from source root
+    pub fn add_dir(&mut self, name: String, key: String) {
+        self.dirs.push(DirEntry { name, key: DirEntry::normalize(&key) });
+    }
+
     pub fn images(&self) -> impl Iterator<Item = &str> + '_ {
         self.resources.images.local_paths()
     }
 
-    /// `exclude` - a folder inside `root` that holds no sources, for example the output
+     /// `exclude` - a folder inside `root` that holds no sources, for example the output
     pub fn index_dir_common(root: &Path, exclude: Option<&Path>) -> io::Result<(Project, Vec<ProjectWarning>)> {
         let mut collected = Collected::default();
         walk(root, exclude, &mut collected)?;
