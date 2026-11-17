@@ -23,6 +23,20 @@ d.dataset.theme=t;try{localStorage.setItem('rush-theme',t)}catch(e){}";
 const NAV_INIT: &str = "<script>(function(){var b=document.getElementById('nav-toggle'),w=matchMedia('(min-width: 901px)');\
 try{if(w.matches&&localStorage.getItem('rush-nav')=='hidden')b.checked=true}catch(e){}\
 b.addEventListener('change',function(){if(w.matches)try{localStorage.setItem('rush-nav',b.checked?'hidden':'shown')}catch(e){}})})()</script>";
+/// Scripts to copy from code block
+const COPY_BUTTON: &str = "<button type=\"button\" class=\"copy\" title=\"Скопировать код\" aria-label=\"Скопировать код\">\
+<svg class=\"copy-icon\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"square\" stroke-linejoin=\"miter\" aria-hidden=\"true\"><g transform=\"translate(24 0) scale(-1 1)\"><rect x=\"9\" y=\"9\" width=\"13\" height=\"13\" rx=\"0\"/><path d=\"M5 15H4V4H15V5\"/></g></svg>\
+<svg class=\"ok-icon\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2.2\" stroke-linecap=\"square\" stroke-linejoin=\"miter\" aria-hidden=\"true\"><path d=\"M4.5 12.5 9.5 17.5 19.5 6.5\"/></svg>\
+</button>";
+const COPY_SCRIPT: &str = "<script>(function(){function ok(b){b.classList.add('done');\
+setTimeout(function(){b.classList.remove('done')},1200)}\
+function plain(b,t){var a=document.createElement('textarea');a.value=t;a.setAttribute('readonly','');\
+a.style.position='fixed';a.style.top='-1000pt';a.style.opacity='0';document.body.appendChild(a);a.select();\
+var r=false;try{r=document.execCommand('copy')}catch(e){}document.body.removeChild(a);if(r)ok(b)}\
+document.addEventListener('click',function(e){var b=e.target.closest('.code > .cap > .copy');if(!b)return;\
+var p=b.closest('.code').querySelector('pre.src'),t=p?p.textContent:'';\
+if(navigator.clipboard&&navigator.clipboard.writeText){navigator.clipboard.writeText(t).then(function(){ok(b)},function(){plain(b,t)})}\
+else{plain(b,t)}})})()</script>";
 
 pub(crate) struct Html;
 
@@ -212,6 +226,20 @@ fn code_css(out: &mut String, style: &Style) {
     if style.code_radius > 0.0 {
         let _ = writeln!(out, "main .code {{ border-radius: {}pt; }}", style.code_radius);
     }
+    if let Some(head) = &style.code_head {
+        // the band spans the whole code box: negative margins cancel the code padding
+        let x = style.code.squeeze;
+        let y = style.code.squeeze_y();
+        let rule = head.rule.to_hex_tag();
+        let [top, right, bottom, left] = head.pad;
+        out.push_str("main .code { position: relative; overflow: hidden; }\n");
+        let _ = writeln!(out, "main .code > .cap {{ display: flex; align-items: center; \
+            margin: -{y}pt -{x}pt {}pt; padding: {top}pt {right}pt {bottom}pt {left}pt; \
+            border-bottom: {}pt solid {rule}; }}",
+            head.gap, head.rule_w);
+        out.push_str("main .code > .cap > .index { flex: none; }\n");
+        out.push_str("main .code > .cap > .name { flex: 1 1 auto; min-width: 0; }\n");
+    }
 }
 
 fn table_css(out: &mut String, style: &Style) {
@@ -287,11 +315,8 @@ impl Writer<'_> {
         Ok(())
     }
 
-    fn caption(&self, out: &mut String, caption: &Caption) -> fmt::Result {
-        if caption.label.is_empty() && caption.name.is_none() {
-            return Ok(());
-        }
-        out.write_str("<div class=\"cap\"><span class=\"index\">")?;
+    fn caption_content(&self, out: &mut String, caption: &Caption) -> fmt::Result {
+        out.write_str("<span class=\"index\">")?;
         escape(out, &caption.label)?;
         out.write_str("</span>")?;
         if let Some(name) = &caption.name {
@@ -299,6 +324,15 @@ impl Writer<'_> {
             self.runs(out, name)?;
             out.write_str("</span>")?;
         }
+        Ok(())
+    }
+
+    fn caption(&self, out: &mut String, caption: &Caption) -> fmt::Result {
+        if caption.label.is_empty() && caption.name.is_none() {
+            return Ok(());
+        }
+        out.write_str("<div class=\"cap\">")?;
+        self.caption_content(out, caption)?;
         out.write_str("</div>")
     }
 
@@ -312,6 +346,23 @@ impl Writer<'_> {
             self.caption(out, caption)?;
         }
         Ok(())
+    }
+
+    fn code_body(&self, out: &mut String, style: &Style, lines: &[String]) -> fmt::Result {
+        out.write_str("<div class=\"body\">")?;
+        if style.code_numbers {
+            out.write_str("<pre class=\"nums\" aria-hidden=\"true\">")?;
+            for n in 1..=lines.len() {
+                writeln!(out, "{n}")?;
+            }
+            out.write_str("</pre>")?;
+        }
+        out.write_str("<pre class=\"src\"><code>")?;
+        for line in lines {
+            escape(out, line)?;
+            out.write_char('\n')?;
+        }
+        out.write_str("</code></pre></div>")
     }
 
     fn cells(&self, out: &mut String, rows: &[Vec<Cell>], aligns: &[Align], tag: &str) -> fmt::Result {
@@ -415,22 +466,29 @@ impl Writer<'_> {
             // TODO: add support with syntect
             Block::Code { caption, lines, anchor, lang: _lang } => {
                 write!(out, "<div class=\"code\" id=\"{}\">", anchor.id())?;
-                self.captioned(out, caption, |out| {
-                    out.write_str("<div class=\"body\">")?;
-                    if style.code_numbers {
-                        out.write_str("<pre class=\"nums\" aria-hidden=\"true\">")?;
-                        for n in 1..=lines.len() {
-                            writeln!(out, "{n}")?;
+                let named = !(caption.label.is_empty() && caption.name.is_none());
+                let after = style.captions.of(caption.kind).caption_after;
+                // with a code head the caption becomes a header band; the band also hosts the copy button
+                let head = style.code_head.is_some();
+                let copy = head && self.ctx.scripts;
+                if !after {
+                    if head && (named || copy) {
+                        out.write_str("<div class=\"cap\">")?;
+                        if named {
+                            self.caption_content(out, caption)?;
                         }
-                        out.write_str("</pre>")?;
+                        if copy {
+                            out.write_str(COPY_BUTTON)?;
+                        }
+                        out.write_str("</div>")?;
+                    } else if named {
+                        self.caption(out, caption)?;
                     }
-                    out.write_str("<pre class=\"src\"><code>")?;
-                    for line in lines {
-                        escape(out, line)?;
-                        out.write_char('\n')?;
-                    }
-                    out.write_str("</code></pre></div>")
-                })?;
+                }
+                self.code_body(out, style, lines)?;
+                if after {
+                    self.caption(out, caption)?;
+                }
                 out.write_str("</div>")
             }
             Block::Table { caption, aligns, widths, head, body, anchor, .. } => {
@@ -576,6 +634,7 @@ impl Semantic for Html {
         let has_nav = !ctx.content.items.is_empty();
         let burger = style.nav_toggle && ctx.scripts && has_nav;
         let theme_button = style.theme_toggle && ctx.scripts && style.dark.is_some();
+        let copy_code = style.code_head.is_some() && ctx.scripts && doc.blocks.iter().any(|b| matches!(b, Block::Code { .. }));
 
         let mut out = String::from("<!DOCTYPE html><html lang=\"ru\"");
         match ctx.theme {
@@ -614,6 +673,9 @@ impl Semantic for Html {
         out.write_str("<main>")?;
         out.write_str(&main)?;
         out.write_str("</main>")?;
+        if copy_code {
+            out.push_str(COPY_SCRIPT);
+        }
         if style.page_toc {
             w.page_toc(&mut out, doc)?;
         }
@@ -709,5 +771,60 @@ mod tests {
         let (files, _) = site(Config { style: DocStyle::Blog, ..Config::default() });
         let intro = page(&files, "intro.html");
         assert!(intro.contains("\">Раздел</h2>") && !intro.contains("<span class=\"index\">"), "{intro}");
+    }
+
+    fn code_site(config: Config) -> (Vec<OutFile>, Vec<crate::Warning>) {
+        let mut p = Project::new();
+        p.add_file("code", "code.rush", "\\// Листинг\nfn main() {}\n\\//\n\n\\// 0\nanon\n\\//".into()).unwrap();
+        p.add_content("Код".into(), "code".into());
+        crate::build(&config, &p).unwrap()
+    }
+
+    #[test]
+    fn code_head_band_and_copy_icons() {
+        for style in [DocStyle::Modern, DocStyle::Blog] {
+            let (files, warns) = code_site(Config { style, ..Config::default() });
+            assert!(warns.is_empty(), "{warns:?}");
+            let html = page(&files, "code.html");
+            // the named listing puts the caption into the header band, the anonymous one gets a band for the button only
+            assert!(html.contains("<div class=\"cap\"><span class=\"index\">1"), "{style:?}: {html}");
+            assert!(html.contains("<div class=\"cap\"><button type=\"button\" class=\"copy\""), "{style:?}: {html}");
+            assert_eq!(html.matches("class=\"copy\"").count(), 2, "{style:?}");
+            assert_eq!(html.matches("class=\"copy-icon\"").count(), 2, "{style:?}");
+            assert_eq!(html.matches("class=\"ok-icon\"").count(), 2, "{style:?}");
+            assert!(html.contains("b.classList.add('done')"), "{style:?}");
+            assert!(!html.contains(">Копировать<"), "{style:?}");
+
+            let css = page(&files, "style.css");
+            assert!(css.contains("main .code { position: relative; overflow: hidden; }"), "{style:?}");
+            assert!(css.contains("main .code > .cap { display: flex;"), "{style:?}");
+            assert!(css.contains("padding: 4pt 5pt 4pt 16pt;"), "{style:?}");
+            assert!(css.contains("border-bottom: 0.75pt solid"), "{style:?}");
+            assert!(css.contains("border-radius: 0pt;"), "{style:?}");
+            assert!(css.contains(".copy.done > .ok-icon"), "{style:?}");
+        }
+    }
+
+    #[test]
+    fn code_copy_and_band_need_scripts() {
+        for style in [DocStyle::Modern, DocStyle::Blog] {
+            let (files, _) = code_site(Config { style, no_js: true, ..Config::default() });
+            let html = page(&files, "code.html");
+            assert!(!html.contains("class=\"copy\"") && !html.contains("<script"), "{style:?}: {html}");
+            assert!(!html.contains("class=\"ok-icon\""), "{style:?}");
+            // the named caption keeps its band, the anonymous listing has none
+            assert!(html.contains("<div class=\"cap\"><span class=\"index\">1"), "{style:?}: {html}");
+            assert!(!html.contains("<div class=\"cap\"></div>"), "{style:?}: {html}");
+        }
+    }
+
+    #[test]
+    fn gost_keeps_plain_code_caption() {
+        let (files, _) = code_site(Config { style: DocStyle::Gost7_32, ..Config::default() });
+        let html = page(&files, "code.html");
+        assert!(!html.contains("class=\"copy\""), "{html}");
+        assert!(html.contains("<div class=\"cap\"><span class=\"index\">Листинг"), "{html}");
+        let css = page(&files, "style.css");
+        assert!(!css.contains("main .code > .cap { display: flex;"), "{css}");
     }
 }

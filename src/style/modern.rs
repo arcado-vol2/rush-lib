@@ -31,6 +31,10 @@ const MONO: FontFamily = FontFamily {
 const ACCENT: Color = Color { r: 0x9a, g: 0x2e, b: 0x1c };
 const TERRACOTTA: Color = Color { r: 0xb3, g: 0x5a, b: 0x1f };
 
+const CODE_HEAD_BG: Color = Color { r: 0xea, g: 0xe5, b: 0xdd };
+const CODE_HEAD_INK: Color = Color { r: 0x4a, g: 0x40, b: 0x38 };
+const CODE_HEAD_RULE: Color = Color { r: 0xd5, g: 0xce, b: 0xc2 };
+
 pub(super) fn style() -> Style {
     let text = Role::text(SIZE, LH);
     let paragraph = Role {first: INDENT, align: Align::Justify, min_first: 2, min_last: 2, ..text};
@@ -96,7 +100,7 @@ pub(super) fn style() -> Style {
          captions: Captions {
             table: Caption { named: "Табл.\u{a0}{n}:\u{a0}\u{a0}", anonymous: "", role: caption, caption_after: false, index_color: Some(TERRACOTTA) },
             image: Caption { named: "Рис.\u{a0}{n}:\u{a0}\u{a0}", anonymous: "", role: caption, caption_after: false, index_color: Some(TERRACOTTA) },
-            code: Caption { named: "{n}\u{a0}|\u{a0}", anonymous: "", role: Role {font: Font::MONO, align: Align::Left, text_color: Some(Color::new(0x6b, 0x5e, 0x52)), ..caption}, caption_after: false, index_color: Some(TERRACOTTA) },
+            code: Caption { named: "{n}\u{a0}|\u{a0}", anonymous: "", role: Role {font: Font { bold: true, ..Font::MONO }, align: Align::Left, bg_color: Some(CODE_HEAD_BG), text_color: Some(CODE_HEAD_INK), ..caption}, caption_after: false, index_color: Some(TERRACOTTA) },
             table_cont: "Табл. {n}",
             formula: "({n})",
         },
@@ -104,6 +108,7 @@ pub(super) fn style() -> Style {
         images: Images { gap: 6.0, px: 0.75, broken_h: 3.0 * LH },
         formula: around(LH),
         code: Role { font: Font::MONO, min_first: 2, min_last: 2, marg_before: 20.0, marg_after: 20.0, squeeze: 16.0, bg_color: Some(Color::new(0xf3, 0xf3, 0xf3)), text_color: Some(Color::new(0x22, 0x22, 0x22)), ..Role { space_before: LH / 2.0, space_after: LH / 2.0, ..small } },
+        code_head: Some(CodeHead { rule: CODE_HEAD_RULE, rule_w: 0.75, pad: [4.0, 5.0, 4.0, 16.0], gap: 6.0 }),
         code_frame: Frame { border: 0.75, pad_x: 6.0, pad_y: 4.0 },
         code_border: false,
         code_numbers: true,

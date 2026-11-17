@@ -96,6 +96,7 @@ pub(super) fn style() -> Style {
         images: Images { gap: 6.0, px: 0.75, broken_h: 3.0 * LH },
         formula: around(LH),
         code: Role { font: Font::MONO, min_first: 2, min_last: 2, ..Role { space_before: LH / 2.0, space_after: LH / 2.0, ..small } },
+        code_head: None,
         code_frame: Frame { border: 0.75, pad_x: 6.0, pad_y: 4.0},
         code_border: true,
         code_numbers: false,

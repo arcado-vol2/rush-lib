@@ -9,7 +9,7 @@ mod content;
 mod project;
 mod color;
 
-pub use config::{Config, DocOut, DocStyle, Theme};
+pub use config::{Config, DocOut, DocStyle, Theme, ConfigConst};
 pub use project::{Project, ProjectWarning};
 pub use render::{Feature, Origin, RenderWarning, RenderWarningKind};
 pub use parse::common::RefKind;

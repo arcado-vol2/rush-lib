@@ -358,6 +358,14 @@ pub(crate) struct Images {
 }
 
 #[derive(Debug, Clone, Copy)]
+pub(crate) struct CodeHead {
+    pub(crate) rule: Color,
+    pub(crate) rule_w: f32,
+    pub(crate) pad: [f32; 4],
+    pub(crate) gap: f32,
+}
+
+#[derive(Debug, Clone, Copy)]
 pub(crate) struct Style {
     pub(crate) name: DocStyle,
     pub(crate) fonts: Fonts,
@@ -396,6 +404,8 @@ pub(crate) struct Style {
     pub(crate) images: Images,
     pub(crate) formula: Role,
     pub(crate) code: Role,
+    /// code caption as a header band; without it the caption stays in the code box
+    pub(crate) code_head: Option<CodeHead>,
     pub(crate) code_frame: Frame,
     pub(crate) code_border: bool,
     /// code line numbers; with a border, the numbers are separated by a line
