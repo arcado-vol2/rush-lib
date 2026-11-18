@@ -13,7 +13,7 @@ pub(crate) const OUT_NAME: &str = "index.html";
 pub(crate) struct HtmlPaged;
 
 fn line(out: &mut String, y: f32, l: &LineBox) {
-    let _ = write!(out, "<div class=\"l\" style=\"top:{y:.2}pt;left:{:.2}pt;font-size:{}pt;line-height:{}pt;height:{}pt", l.x, l.size, l.lh, l.lh);
+    let _ = write!(out, "\n\t\t<div class=\"l\" style=\"top:{y:.2}pt;left:{:.2}pt;font-size:{}pt;line-height:{}pt;height:{}pt", l.x, l.size, l.lh, l.lh);
     if l.word_spacing > 0.0 {
         let _ = write!(out, ";word-spacing:{:.3}pt", l.word_spacing);
     }
@@ -61,24 +61,24 @@ fn item(out: &mut String, item: &Item) {
     match item {
         Item::Line { y, line: l } => line(out, *y, l),
         Item::Rule { x, y, w, h } => {
-            let _ = write!(out, "<div class=\"rule\" style=\"left:{x:.2}pt;top:{y:.2}pt;width:{w:.2}pt;height:{h:.2}pt\"></div>");
+            let _ = write!(out, "\n\t\t<div class=\"rule\" style=\"left:{x:.2}pt;top:{y:.2}pt;width:{w:.2}pt;height:{h:.2}pt\"></div>");
         }
         Item::Fill { x, y, w, h, color } => {
-            let _ = write!(out, "<div class=\"fill\" style=\"left:{x:.2}pt;top:{y:.2}pt;width:{w:.2}pt;height:{h:.2}pt;background:{}\"></div>", color.to_hex_tag());
+            let _ = write!(out, "\n\t\t<div class=\"fill\" style=\"left:{x:.2}pt;top:{y:.2}pt;width:{w:.2}pt;height:{h:.2}pt;background:{}\"></div>", color.to_hex_tag());
         }
         Item::Leader { x, y, w } => {
-            let _ = write!(out, "<div class=\"leader\" style=\"left:{x:.2}pt;top:{y:.2}pt;width:{w:.2}pt\"></div>");
+            let _ = write!(out, "\n\t\t<div class=\"leader\" style=\"left:{x:.2}pt;top:{y:.2}pt;width:{w:.2}pt\"></div>");
         }
         Item::Image { x, y, w, h, src } => {
-            out.push_str("<img alt=\"\" src=\"");
+            out.push_str("\n\t\t<img alt=\"\" src=\"");
             let _ = escape(out, src);
             let _ = write!(out, "\" style=\"left:{x:.2}pt;top:{y:.2}pt;width:{w:.2}pt;height:{h:.2}pt\">");
         }
         Item::Math { x, y, w, h, size, mathml } => {
-            let _ = write!(out, "<div class=\"math\" style=\"left:{x:.2}pt;top:{y:.2}pt;width:{w:.2}pt;height:{h:.2}pt;font-size:{size}pt\">{mathml}</div>");
+            let _ = write!(out, "\n\t\t<div class=\"math\" style=\"left:{x:.2}pt;top:{y:.2}pt;width:{w:.2}pt;height:{h:.2}pt;font-size:{size}pt\">{mathml}</div>");
         }
         Item::Anchor { y, id } => {
-            let _ = write!(out, "<a class=\"anchor\" id=\"{id}\" style=\"top:{y:.2}pt\"></a>");
+            let _ = write!(out, "\n\t\t<a class=\"anchor\" id=\"{id}\" style=\"top:{y:.2}pt\"></a>");
         }
     }
 }
@@ -106,18 +106,18 @@ impl Fixed for HtmlPaged {
     }
 
     fn paint(&self, layout: &Layout, style: &Style) -> Vec<OutFile> {
-        let mut html = String::from("<!DOCTYPE html><html lang=\"ru\"><head><meta charset=\"UTF-8\">");
-        html.push_str("<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\"><title>");
+        let mut html = String::from("<!DOCTYPE html>\n<html lang=\"ru\">\n\n<head>\n\t<meta charset=\"UTF-8\">");
+        html.push_str("\n\t<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\n\t<title>");
         let _ = escape(&mut html, &layout.title);
-        let _ = write!(html, "</title><link rel=\"stylesheet\" href=\"{CSS_NAME}\"></head><body>");
+        let _ = write!(html, "</title>\n\t<link rel=\"stylesheet\" href=\"{CSS_NAME}\">\n</head>\n\n<body>");
         for page in &layout.pages {
-            html.push_str("<section class=\"page\"><div class=\"content\">");
+            html.push_str("\n<section class=\"page\">\n\t<div class=\"content\">");
             for i in &page.items {
                 item(&mut html, i);
             }
-            html.push_str("</div></section>");
+            html.push_str("\n\t</div>\n</section>\n");
         }
-        html.push_str("</body></html>");
+        html.push_str("\n</body>\n\n</html>");
         vec![
             OutFile { path: CSS_NAME.to_string(), data: css(style, layout).into_bytes() },
             OutFile { path: OUT_NAME.to_string(), data: html.into_bytes() },

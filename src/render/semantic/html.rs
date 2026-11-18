@@ -15,28 +15,12 @@ const BASE_CSS: &str = include_str!("../../templates/html/base.css");
 pub(crate) const CSS_NAME: &str = "style.css";
 
 /// Scripts to save choises
-const THEME_INIT: &str = "<script>try{var t=localStorage.getItem('rush-theme');\
-if(t=='light'||t=='dark')document.documentElement.dataset.theme=t}catch(e){}</script>";
-const THEME_SWITCH: &str = "var d=document.documentElement,t=d.dataset.theme||\
-(matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light');t=t=='dark'?'light':'dark';\
-d.dataset.theme=t;try{localStorage.setItem('rush-theme',t)}catch(e){}";
-const NAV_INIT: &str = "<script>(function(){var b=document.getElementById('nav-toggle'),w=matchMedia('(min-width: 901px)');\
-try{if(w.matches&&localStorage.getItem('rush-nav')=='hidden')b.checked=true}catch(e){}\
-b.addEventListener('change',function(){if(w.matches)try{localStorage.setItem('rush-nav',b.checked?'hidden':'shown')}catch(e){}})})()</script>";
+const THEME_INIT: &str = "\n\t<script>\n\t\ttry {\n\t\t\tvar t = localStorage.getItem('rush-theme');\n\t\t\tif (t == 'light' || t == 'dark') document.documentElement.dataset.theme = t;\n\t\t} catch (e) {}\n\t</script>";
+const THEME_SWITCH: &str = "var d=document.documentElement,t=d.dataset.theme||(matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light');t=t=='dark'?'light':'dark'; d.dataset.theme=t;try{localStorage.setItem('rush-theme',t)}catch(e){}";
+const NAV_INIT: &str = "\n\t<script>\n\t\t(function () {\n\t\t\tvar b = document.getElementById('nav-toggle'),\n\t\t\t\tw = matchMedia('(min-width: 901px)');\n\t\t\ttry {\n\t\t\t\tif (w.matches && localStorage.getItem('rush-nav') == 'hidden')\n\t\t\t\tb.checked = true;\n\t\t\t} catch (e) {}\n\t\t\tb.addEventListener('change', function () {\n\t\t\t\tif (w.matches)\n\t\t\t\t\ttry {\n\t\t\t\t\t\tlocalStorage.setItem('rush-nav', b.checked ? 'hidden' : 'shown');\n\t\t\t\t\t} catch (e) {}\n\t\t\t});\n\t\t})();\n\t</script>";
 /// Scripts to copy from code block
-const COPY_BUTTON: &str = "<button type=\"button\" class=\"copy\" title=\"Скопировать код\" aria-label=\"Скопировать код\">\
-<svg class=\"copy-icon\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"square\" stroke-linejoin=\"miter\" aria-hidden=\"true\"><g transform=\"translate(24 0) scale(-1 1)\"><rect x=\"9\" y=\"9\" width=\"13\" height=\"13\" rx=\"0\"/><path d=\"M5 15H4V4H15V5\"/></g></svg>\
-<svg class=\"ok-icon\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2.2\" stroke-linecap=\"square\" stroke-linejoin=\"miter\" aria-hidden=\"true\"><path d=\"M4.5 12.5 9.5 17.5 19.5 6.5\"/></svg>\
-</button>";
-const COPY_SCRIPT: &str = "<script>(function(){function ok(b){b.classList.add('done');\
-setTimeout(function(){b.classList.remove('done')},1200)}\
-function plain(b,t){var a=document.createElement('textarea');a.value=t;a.setAttribute('readonly','');\
-a.style.position='fixed';a.style.top='-1000pt';a.style.opacity='0';document.body.appendChild(a);a.select();\
-var r=false;try{r=document.execCommand('copy')}catch(e){}document.body.removeChild(a);if(r)ok(b)}\
-document.addEventListener('click',function(e){var b=e.target.closest('.code > .cap > .copy');if(!b)return;\
-var p=b.closest('.code').querySelector('pre.src'),t=p?p.textContent:'';\
-if(navigator.clipboard&&navigator.clipboard.writeText){navigator.clipboard.writeText(t).then(function(){ok(b)},function(){plain(b,t)})}\
-else{plain(b,t)}})})()</script>";
+const COPY_BUTTON: &str = "<button type=\"button\" class=\"copy\" title=\"Скопировать код\" aria-label=\"Скопировать код\">\n\t\t\t\t<svg class=\"copy-icon\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"square\" stroke-linejoin=\"miter\" aria-hidden=\"true\">\n\t\t\t\t\t<g transform=\"translate(24 0) scale(-1 1)\">\n\t\t\t\t\t\t<rect x=\"9\" y=\"9\" width=\"13\" height=\"13\" rx=\"0\"/>\n\t\t\t\t\t\t\t<path d=\"M5 15H4V4H15V5\"/>\n\t\t\t\t\t\t</g>\n\t\t\t\t\t</svg>\n\t\t\t\t<svg class=\"ok-icon\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2.2\" stroke-linecap=\"square\" stroke-linejoin=\"miter\" aria-hidden=\"true\">\n\t\t\t\t\t<path d=\"M4.5 12.5 9.5 17.5 19.5 6.5\"/>\n\t\t\t\t</svg>\n\t\t\t</button>";
+const COPY_SCRIPT: &str = "\n<script>\n\t(function () {\n\t\tfunction ok(b) {\n\t\t\tb.classList.add('done');\n\t\t\tsetTimeout(function () {\n\t\t\t\tb.classList.remove('done');\n\t\t\t}, 1200);\n\t\t}\n\t\tfunction plain(b, t) {\n\t\t\tvar a = document.createElement('textarea');\n\t\t\ta.value = t;\n\t\t\ta.setAttribute('readonly', '');\n\t\t\ta.style.position = 'fixed';\n\t\t\ta.style.top = '-1000pt';\n\t\t\ta.style.opacity = '0';\n\t\t\tdocument.body.appendChild(a);\n\t\t\ta.select();\n\t\t\tvar r = false;\n\t\t\ttry {\n\t\t\t\tr = document.execCommand('copy');\n\t\t\t} catch (e) {}\n\t\t\tdocument.body.removeChild(a);\n\t\t\tif (r) ok(b);\n\t\t}\n\t\tdocument.addEventListener('click', function (e) {\n\t\t\tvar b = e.target.closest('.code > .cap > .copy');\n\t\t\tif (!b) return;\n\t\t\tvar p = b.closest('.code').querySelector('pre.src'),\n\t\t\t\tt = p ? p.textContent : '';\n\t\t\tif (navigator.clipboard && navigator.clipboard.writeText) {\n\t\t\t\tnavigator.clipboard.writeText(t).then(\n\t\t\t\t\tfunction () {\n\t\t\t\t\t\tok(b);\n\t\t\t\t\t},\n\t\t\t\t\tfunction () {\n\t\t\t\t\t\tplain(b, t);\n\t\t\t\t\t},\n\t\t\t\t);\n\t\t\t} else {\n\t\t\t\tplain(b, t);\n\t\t\t}\n\t\t});\n\t})();\n</script>";
 
 pub(crate) struct Html;
 
@@ -316,7 +300,7 @@ impl Writer<'_> {
     }
 
     fn caption_content(&self, out: &mut String, caption: &Caption) -> fmt::Result {
-        out.write_str("<span class=\"index\">")?;
+        out.write_str("\n\t\t\t<span class=\"index\">")?;
         escape(out, &caption.label)?;
         out.write_str("</span>")?;
         if let Some(name) = &caption.name {
@@ -331,9 +315,9 @@ impl Writer<'_> {
         if caption.label.is_empty() && caption.name.is_none() {
             return Ok(());
         }
-        out.write_str("<div class=\"cap\">")?;
+        out.write_str("\n\t\t<div class=\"cap\">")?;
         self.caption_content(out, caption)?;
-        out.write_str("</div>")
+        out.write_str("\n\t\t</div>")
     }
 
     fn captioned(&self, out: &mut String, caption: &Caption, body: impl FnOnce(&mut String) -> fmt::Result) -> fmt::Result {
@@ -349,29 +333,29 @@ impl Writer<'_> {
     }
 
     fn code_body(&self, out: &mut String, style: &Style, lines: &[String]) -> fmt::Result {
-        out.write_str("<div class=\"body\">")?;
+        out.write_str("\n\t\t<div class=\"body\">")?;
         if style.code_numbers {
-            out.write_str("<pre class=\"nums\" aria-hidden=\"true\">")?;
+            out.write_str("\n\t\t\t<pre class=\"nums\" aria-hidden=\"true\">")?;
             for n in 1..=lines.len() {
                 writeln!(out, "{n}")?;
             }
             out.write_str("</pre>")?;
         }
-        out.write_str("<pre class=\"src\"><code>")?;
+        out.write_str("\n\t\t\t<pre class=\"src\"><code>")?;
         for line in lines {
             escape(out, line)?;
             out.write_char('\n')?;
         }
-        out.write_str("</code></pre></div>")
+        out.write_str("</code></pre>\n\t\t</div>")
     }
 
     fn cells(&self, out: &mut String, rows: &[Vec<Cell>], aligns: &[Align], tag: &str) -> fmt::Result {
         for row in rows {
-            out.write_str("<tr>")?;
+            out.write_str("\n\t\t\t\t<tr>")?;
             for cell in row {
                 match cell {
                     Cell::Text { col, w, h, runs } => {
-                        write!(out, "<{tag} class=\"{}\"", align_name(aligns[*col]))?;
+                        write!(out, "\n\t\t\t\t\t<{tag} class=\"{}\"", align_name(aligns[*col]))?;
                         if *w > 1 {
                             write!(out, " colspan=\"{w}\"")?;
                         }
@@ -383,7 +367,7 @@ impl Writer<'_> {
                         write!(out, "</{tag}>")?;
                     }
                     Cell::Empty { col, join_top, join_left } => {
-                        write!(out, "<{tag} class=\"{}", align_name(aligns[*col]))?;
+                        write!(out, "\n\t\t\t\t\t<{tag} class=\"{}", align_name(aligns[*col]))?;
                         if *join_top {
                             out.write_str(" join-top")?;
                         }
@@ -394,7 +378,7 @@ impl Writer<'_> {
                     }
                 }
             }
-            out.write_str("</tr>")?;
+            out.write_str("\n\t\t\t\t</tr>")?;
         }
         Ok(())
     }
@@ -404,68 +388,70 @@ impl Writer<'_> {
         match block {
             Block::Para { kind, runs } => {
                 out.write_str(match kind {
-                    ParaKind::Body => "<p>",
-                    ParaKind::Comment => "<p class=\"comment\">",
+                    ParaKind::Body => "\t<p>\n",
+                    ParaKind::Comment => "\t<p class=\"comment\">\n",
                 })?;
+                out.write_str("\t\t")?;
                 self.runs(out, runs)?;
-                out.write_str("</p>")
+                out.write_str("\n\t</p>")
             }
             Block::Header { level, number, runs, anchor } => {
-                write!(out, "<h{level} id=\"{}\">", anchor.id())?;
+                write!(out, "\n\t<h{level} id=\"{}\">\n", anchor.id())?;
+                out.write_str("\t\t")?;
                 if let Some(n) = number {
                     out.write_str("<span class=\"index\">")?;
                     escape(out, n)?;
                     out.write_str("</span> ")?;
                 }
                 self.runs(out, runs)?;
-                write!(out, "</h{level}>")
+                write!(out, "\n\t</h{level}>")
             }
             Block::List(items) => {
-                out.write_str("<div class=\"list\">")?;
+                out.write_str("\t<div class=\"list\">")?;
                 for item in items {
-                    write!(out, "<div class=\"item\" style=\"--level: {}\"><span class=\"marker\">", item.level)?;
+                    write!(out, "\n\t\t<div class=\"item\" style=\"--level: {}\">\n\t\t\t<span class=\"marker\">", item.level)?;
                     escape(out, &item.marker)?;
-                    out.write_str("</span><span class=\"text\">")?;
+                    out.write_str("</span>\n\t\t\t<span class=\"text\">")?;
                     self.runs(out, &item.runs)?;
-                    out.write_str("</span></div>")?;
+                    out.write_str("</span>\n\t\t</div>")?;
                 }
-                out.write_str("</div>")
+                out.write_str("\n\t</div>")
             }
             Block::Figure { caption, image, scale, anchor } => {
-                write!(out, "<div class=\"figure\" id=\"{}\">", anchor.id())?;
+                write!(out, "\t<div class=\"figure\" id=\"{}\">", anchor.id())?;
                 self.captioned(out, caption, |out| {
-                    out.write_str("<div class=\"body\">")?;
+                    out.write_str("\n\t\t<div class=\"body\">")?;
                     match image {
                         Some(id) => {
-                            out.write_str("<img alt=\"\" src=\"")?;
+                            out.write_str("\n\t\t\t<img alt=\"\" src=\"")?;
                             escape(out, &self.ctx.res.href(self.file, *id))?;
                             write!(out, "\" style=\"zoom: {scale}%\">")?;
                         }
                         None => out.write_str("<span class=\"error\">??</span>")?,
                     }
-                    out.write_str("</div>")
+                    out.write_str("\n\t\t</div>")
                 })?;
-                out.write_str("</div>")
+                out.write_str("\n\t</div>")
             }
             Block::Formula { name, mathml, number, anchor, .. } => {
-                write!(out, "<div class=\"formula\" id=\"{}\">", anchor.id())?;
+                write!(out, "\t<div class=\"formula\" id=\"{}\">", anchor.id())?;
                 if let Some(name) = name {
-                    out.write_str("<div class=\"name\">")?;
+                    out.write_str("\n\t\t<div class=\"name\">")?;
                     self.runs(out, name)?;
                     out.write_str("</div>")?;
                 }
-                out.write_str("<div class=\"body\">")?;
+                out.write_str("\n\t\t<div class=\"body\">\n\t\t\t")?;
                 match mathml {
                     Some(m) => out.write_str(m)?,
                     None => out.write_str("<span class=\"error\">??</span>")?,
                 }
-                out.write_str("</div><div class=\"index\">")?;
+                out.write_str("\n\t\t</div>\n\t\t<div class=\"index\">")?;
                 escape(out, number)?;
-                out.write_str("</div></div>")
+                out.write_str("</div>\n\t</div>")
             }
             // TODO: add support with syntect
             Block::Code { caption, lines, anchor, lang: _lang } => {
-                write!(out, "<div class=\"code\" id=\"{}\">", anchor.id())?;
+                write!(out, "\t<div class=\"code\" id=\"{}\">", anchor.id())?;
                 let named = !(caption.label.is_empty() && caption.name.is_none());
                 let after = style.captions.of(caption.kind).caption_after;
                 // with a code head the caption becomes a header band; the band also hosts the copy button
@@ -473,14 +459,15 @@ impl Writer<'_> {
                 let copy = head && self.ctx.scripts;
                 if !after {
                     if head && (named || copy) {
-                        out.write_str("<div class=\"cap\">")?;
+                        out.write_str("\n\t\t<div class=\"cap\">")?;
                         if named {
                             self.caption_content(out, caption)?;
                         }
                         if copy {
+                            out.write_str("\n\t\t\t")?;
                             out.write_str(COPY_BUTTON)?;
                         }
-                        out.write_str("</div>")?;
+                        out.write_str("\n\t\t</div>")?;
                     } else if named {
                         self.caption(out, caption)?;
                     }
@@ -489,41 +476,41 @@ impl Writer<'_> {
                 if after {
                     self.caption(out, caption)?;
                 }
-                out.write_str("</div>")
+                out.write_str("\n\t</div>")
             }
             Block::Table { caption, aligns, widths, head, body, anchor, .. } => {
-                write!(out, "<div class=\"table\" id=\"{}\">", anchor.id())?;
+                write!(out, "\t<div class=\"table\" id=\"{}\">", anchor.id())?;
                 self.captioned(out, caption, |out| {
                     match widths {
                         Some(widths) => {
-                            out.write_str("<table style=\"table-layout: fixed\"><colgroup>")?;
+                            out.write_str("\n\t\t<table style=\"table-layout: fixed\">\n\t\t\t<colgroup>")?;
                             for w in widths {
-                                write!(out, "<col style=\"width: {:.2}%\">", w * 100.0)?;
+                                write!(out, "\n\t\t\t\t<col style=\"width: {:.2}%\">", w * 100.0)?;
                             }
-                            out.write_str("</colgroup>")?;
+                            out.write_str("\n\t\t\t</colgroup>")?;
                         }
-                        None => out.write_str("<table>")?,
+                        None => out.write_str("\n\t\t<table>")?,
                     }
                     if !head.is_empty() {
                         let head_aligns = vec![style.head_cell.align; aligns.len()];
-                        out.write_str("<thead>")?;
+                        out.write_str("\n\t\t\t<thead>")?;
                         self.cells(out, head, &head_aligns, "th")?;
-                        out.write_str("</thead>")?;
+                        out.write_str("\n\t\t\t</thead>")?;
                     }
-                    out.write_str("<tbody>")?;
+                    out.write_str("\n\t\t\t<tbody>")?;
                     self.cells(out, body, aligns, "td")?;
-                    out.write_str("</tbody></table>")
+                    out.write_str("\n\t\t\t</tbody>\n\t\t</table>")
                 })?;
-                out.write_str("</div>")
+                out.write_str("\n\t</div>")
             }
             Block::Notes(defs) => {
-                out.write_str("<div class=\"notes\">")?;
+                out.write_str("\t<div class=\"notes\">")?;
                 for def in defs {
-                    write!(out, "<div class=\"note\" id=\"{}\"><sup>{}</sup> ", ir::Anchor::Note(def.g).id(), def.g)?;
+                    write!(out, "\n\t\t<div class=\"note\" id=\"{}\">\n\t\t\t<sup>{}</sup> ", ir::Anchor::Note(def.g).id(), def.g)?;
                     self.runs(out, &def.runs)?;
-                    out.write_str("</div>")?;
+                    out.write_str("\n\t\t</div>")?;
                 }
-                out.write_str("</div>")
+                out.write_str("\n\t</div>")
             }
         }
     }
@@ -544,10 +531,15 @@ fn group_has(items: &[crate::content::ContentItem], from: usize, depth: usize, f
 
 impl Writer<'_> {
     fn nav(&self, out: &mut String, content: &Content) -> fmt::Result {
+        fn indent(out: &mut String, value: usize) {
+            out.push('\n');
+            out.extend(std::iter::repeat('\t').take(value));
+        }
+
         let (res, style) = (self.ctx.res, self.ctx.style);
-        out.write_str("<nav class=\"toc\">")?;
+        out.write_str("\n\n<nav class=\"toc\">")?;
         if let Some(title) = style.chrome.nav_title {
-            out.write_str("<div class=\"nav-title\">")?;
+            out.write_str("\n\t<div class=\"nav-title\">")?;
             escape(out, title)?;
             out.write_str("</div>")?;
         }
@@ -556,19 +548,24 @@ impl Writer<'_> {
         for (i, item) in items.iter().enumerate() {
             let shared = item.dirs.len() - item.opens;
             while open > shared {
+                indent(out, open);
                 out.write_str("</details>")?;
                 open -= 1;
             }
             for depth in shared..item.dirs.len() {
+                indent(out, depth + 1);
                 out.write_str("<details class=\"dir\"")?;
                 if group_has(items, i, depth, self.file) {
                     out.write_str(" open")?;
                 }
-                write!(out, "><summary style=\"--level: {depth}\">")?;
+                out.write_char('>')?;
+                indent(out, depth + 2);
+                write!(out, "<summary style=\"--level: {depth}\">")?;
                 self.runs(out, &ir::styled_runs(&item.dirs[depth], style))?;
                 out.write_str("</summary>")?;
             }
             open = item.dirs.len();
+            indent(out, open + 1);
             out.write_str("<a class=\"item")?;
             if item.file == self.file {
                 out.write_str(" current\" aria-current=\"page")?;
@@ -579,10 +576,11 @@ impl Writer<'_> {
             self.runs(out, &ir::styled_runs(&item.name, style))?;
             out.write_str("</a>")?;
         }
-        for _ in 0..open {
+        for value in 1..=open {
+            indent(out, value);
             out.write_str("</details>")?;
         }
-        out.write_str("</nav>")
+        out.write_str("\n</nav>")
     }
 
     fn page_toc(&self, out: &mut String, doc: &ir::Doc) -> fmt::Result {
@@ -592,9 +590,9 @@ impl Writer<'_> {
             _ => None,
         }).collect();
         let Some(top) = headers.iter().map(|h| h.0).min() else { return Ok(()) };
-        out.write_str("<aside class=\"page-toc\">")?;
+        out.write_str("\n<aside class=\"page-toc\">")?;
         for (level, number, runs, anchor) in headers {
-            write!(out, "<a style=\"--level: {}\" href=\"#{}\">", level - top, anchor.id())?;
+            write!(out, "\n\t<a style=\"--level: {}\" href=\"#{}\">", level - top, anchor.id())?;
             if let Some(n) = number {
                 escape(out, n)?;
                 out.write_char(' ')?;
@@ -602,7 +600,7 @@ impl Writer<'_> {
             self.runs(out, runs)?;
             out.write_str("</a>")?;
         }
-        out.write_str("</aside>")
+        out.write_str("\n</aside>")
     }
 }
 
@@ -630,61 +628,66 @@ impl Semantic for Html {
         let mut main = String::new();
         for block in &doc.blocks {
             w.block(&mut main, block)?;
+            main.write_char('\n')?;
         }
         let has_nav = !ctx.content.items.is_empty();
         let burger = style.nav_toggle && ctx.scripts && has_nav;
         let theme_button = style.theme_toggle && ctx.scripts && style.dark.is_some();
         let copy_code = style.code_head.is_some() && ctx.scripts && doc.blocks.iter().any(|b| matches!(b, Block::Code { .. }));
 
-        let mut out = String::from("<!DOCTYPE html><html lang=\"ru\"");
+        let mut out = String::from("<!DOCTYPE html>\n<html lang=\"ru\"");
         match ctx.theme {
             Theme::Light if style.dark.is_some() => out.push_str(" data-theme=\"light\""),
             Theme::Dark => out.push_str(" data-theme=\"dark\""),
             _ => {}
         }
-        out.push_str("><head><meta charset=\"UTF-8\">");
-        out.push_str("<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\"><title>");
+        out.push_str(">\n\n<head>\n\t<meta charset=\"UTF-8\">");
+        out.push_str("\n\t<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\n\t<title>");
         escape(&mut out, &doc.title)?;
-        out.write_str("</title><link rel=\"stylesheet\" href=\"")?;
+        out.write_str("</title>\n\t<link rel=\"stylesheet\" href=\"")?;
         escape(&mut out, &res.root_href(file, CSS_NAME))?;
         out.write_str("\">")?;
         if theme_button {
             out.push_str(THEME_INIT);
         }
-        out.write_str("</head><body>")?;
+        out.write_str("\n</head>\n\n<body>")?;
         if burger {
-            out.push_str("<input type=\"checkbox\" id=\"nav-toggle\" class=\"nav-toggle\">");
+            out.push_str("\n<input type=\"checkbox\" id=\"nav-toggle\" class=\"nav-toggle\">");
             out.push_str(NAV_INIT);
         }
-        out.write_str("<header class=\"title\">")?;
+        out.write_str("\n<header class=\"title\">")?;
         if burger {
-            out.push_str("<label for=\"nav-toggle\" class=\"burger\" title=\"Меню\" aria-label=\"Меню\">☰</label>");
+            out.push_str("\n\t<label for=\"nav-toggle\" class=\"burger\" title=\"Меню\" aria-label=\"Меню\">☰</label>");
         }
-        out.write_str("<span class=\"name\">")?;
+        out.write_str("\n\t<span class=\"name\">")?;
         w.runs(&mut out, &ir::styled_runs(&doc.title, style))?;
         out.write_str("</span>")?;
         if theme_button {
-            write!(out, "<button type=\"button\" class=\"theme\" title=\"Тема\" aria-label=\"Сменить тему\" onclick=\"{THEME_SWITCH}\">◐</button>")?;
+            write!(out, "\n\t<button type=\"button\" class=\"theme\" title=\"Тема\" aria-label=\"Сменить тему\" onclick=\"{THEME_SWITCH}\">◐</button>")?;
         }
-        out.write_str("</header>")?;
+        out.write_str("\n</header>")?;
         if has_nav {
             w.nav(&mut out, ctx.content)?;
         }
-        out.write_str("<main>")?;
+        out.write_str("\n\n<main>")?;
+        if !main.starts_with('\n') {
+            out.write_char('\n')?;
+        }
         out.write_str(&main)?;
         out.write_str("</main>")?;
         if copy_code {
             out.push_str(COPY_SCRIPT);
         }
+        out.write_char('\n')?;
         if style.page_toc {
             w.page_toc(&mut out, doc)?;
         }
-        out.write_str("</body></html>")?;
+        out.write_str("\n</body>\n\n</html>")?;
         Ok(out)
     }
 
     fn joined(&self, _project: &ir::Project, _ctx: &PageCtx) -> Result<String, fmt::Error> {
-        unreachable!("html с single собирает постраничный вывод")
+        unreachable!("html with single trying to build page-by-page output")
     }
 }
 
@@ -715,10 +718,10 @@ mod tests {
     fn nav_groups_dirs_and_opens_current() {
         let (files, _) = site(Config { style: DocStyle::Blog, ..Config::default() });
         let two = page(&files, "a/b/two.html");
-        assert!(two.contains("<details class=\"dir\" open><summary style=\"--level: 0\">Раздел A</summary>"), "{two}");
-        assert!(two.contains("<details class=\"dir\" open><summary style=\"--level: 1\">b</summary>"), "{two}");
-        assert!(two.contains("<details class=\"dir\"><summary style=\"--level: 0\">c</summary>"), "{two}");
-        assert!(two.contains("Два</a></details></details><details"), "{two}");
+        assert!(two.contains("\n\t<details class=\"dir\" open>\n\t\t<summary style=\"--level: 0\">Раздел A</summary>"), "{two}");
+        assert!(two.contains("\n\t\t<details class=\"dir\" open>\n\t\t\t<summary style=\"--level: 1\">b</summary>"), "{two}");
+        assert!(two.contains("\n\t<details class=\"dir\">\n\t\t<summary style=\"--level: 0\">c</summary>"), "{two}");
+        assert!(two.contains("Два</a>\n\t\t</details>\n\t</details>\n\t<details"), "{two}");
         let intro = page(&files, "intro.html");
         assert!(!intro.contains("<details class=\"dir\" open>"), "{intro}");
     }
@@ -756,8 +759,8 @@ mod tests {
             assert!(warns.is_empty(), "{warns:?}");
             let intro = page(&files, "intro.html");
             match attr {
-                Some(a) => assert!(intro.starts_with(&format!("<!DOCTYPE html><html lang=\"ru\" data-theme=\"{a}\">")), "{intro}"),
-                None => assert!(intro.starts_with("<!DOCTYPE html><html lang=\"ru\">"), "{intro}"),
+                Some(a) => assert!(intro.starts_with(&format!("<!DOCTYPE html>\n<html lang=\"ru\" data-theme=\"{a}\">")), "{intro}"),
+                None => assert!(intro.starts_with("<!DOCTYPE html>\n<html lang=\"ru\">"), "{intro}"),
             }
         }
         let (files, _) = site(Config { style: DocStyle::Blog, ..Config::default() });
@@ -770,7 +773,7 @@ mod tests {
     fn blog_headers_without_numbers() {
         let (files, _) = site(Config { style: DocStyle::Blog, ..Config::default() });
         let intro = page(&files, "intro.html");
-        assert!(intro.contains("\">Раздел</h2>") && !intro.contains("<span class=\"index\">"), "{intro}");
+        assert!(intro.contains("\">\n\t\tРаздел\n\t</h2>") &&!intro.contains("<span class=\"index\">"), "{intro}");
     }
 
     fn code_site(config: Config) -> (Vec<OutFile>, Vec<crate::Warning>) {
@@ -787,8 +790,8 @@ mod tests {
             assert!(warns.is_empty(), "{warns:?}");
             let html = page(&files, "code.html");
             // the named listing puts the caption into the header band, the anonymous one gets a band for the button only
-            assert!(html.contains("<div class=\"cap\"><span class=\"index\">1"), "{style:?}: {html}");
-            assert!(html.contains("<div class=\"cap\"><button type=\"button\" class=\"copy\""), "{style:?}: {html}");
+            assert!(html.contains("<div class=\"cap\">\n\t\t\t<span class=\"index\">1"), "{style:?}: {html}");
+            assert!(html.contains("<div class=\"cap\">\n\t\t\t<button type=\"button\" class=\"copy\""), "{style:?}: {html}");
             assert_eq!(html.matches("class=\"copy\"").count(), 2, "{style:?}");
             assert_eq!(html.matches("class=\"copy-icon\"").count(), 2, "{style:?}");
             assert_eq!(html.matches("class=\"ok-icon\"").count(), 2, "{style:?}");
@@ -813,8 +816,8 @@ mod tests {
             assert!(!html.contains("class=\"copy\"") && !html.contains("<script"), "{style:?}: {html}");
             assert!(!html.contains("class=\"ok-icon\""), "{style:?}");
             // the named caption keeps its band, the anonymous listing has none
-            assert!(html.contains("<div class=\"cap\"><span class=\"index\">1"), "{style:?}: {html}");
-            assert!(!html.contains("<div class=\"cap\"></div>"), "{style:?}: {html}");
+            assert!(html.contains("<div class=\"cap\">\n\t\t\t<span class=\"index\">1"), "{style:?}: {html}");
+            assert!(!html.contains("<div class=\"cap\">\n\t\t</div>"), "{style:?}: {html}");
         }
     }
 
@@ -823,7 +826,7 @@ mod tests {
         let (files, _) = code_site(Config { style: DocStyle::Gost7_32, ..Config::default() });
         let html = page(&files, "code.html");
         assert!(!html.contains("class=\"copy\""), "{html}");
-        assert!(html.contains("<div class=\"cap\"><span class=\"index\">Листинг"), "{html}");
+        assert!(html.contains("<div class=\"cap\">\n\t\t\t<span class=\"index\">Листинг"), "{html}");
         let css = page(&files, "style.css");
         assert!(!css.contains("main .code > .cap { display: flex;"), "{css}");
     }

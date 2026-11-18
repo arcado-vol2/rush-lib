@@ -163,7 +163,10 @@ pub(crate) fn build(config: &Config, project: &Project, content: &Content) -> Re
     let mut warn = Vec::new();
     let theme = theme(config, &style, &backend, &mut warn);
     let scripts = !config.no_js;
-    let mut files = font_files(&style);
+    let mut files = Vec::new();
+    if config.out == DocOut::Html {
+        files = font_files(&style);
+    }
     match &backend {
         Backend::Semantic(b) if config.single => {
             files.extend(b.assets(&style));
@@ -227,7 +230,7 @@ mod tests {
         assert!(html.1.is_empty() && paged.1.is_empty(), "{:?} {:?}", html.1, paged.1);
 
         let page = String::from_utf8(html.0[html.0.len() - 1].data.clone()).unwrap();
-        assert!(page.contains("<h2 id=\"h-1-1\"><span class=\"index\">1</span> Раздел</h2>"), "{page}");
+        assert!(page.contains("<h2 id=\"h-1-1\">\n\t\t<span class=\"index\">1</span> Раздел\n\t</h2>"), "{page}");
         let css = String::from_utf8(paged.0.iter().find(|f| f.path == "style.css").unwrap().data.clone()).unwrap();
         assert!(!css.contains("display: none"), "стиль не прячет и не переставляет");
     }
@@ -285,7 +288,7 @@ mod tests {
         let (files, _) = build(&Config { style: DocStyle::Gost7_32, out: DocOut::Html, single: false, ..Config::default() }, &p, &content).unwrap();
         let page = text_of(&files, "a.html");
         assert!(page.contains("<title>Про Rust</title>"), "{page}");
-        assert!(page.contains("<header class=\"title\"><span class=\"name\">Про <i><span class=\"mono\">Rust</span></i></span></header>"), "{page}");
+        assert!(page.contains("<header class=\"title\">\n\t<span class=\"name\">Про <i><span class=\"mono\">Rust</span></i></span>\n</header>"), "{page}");
     }
 
     #[test]
