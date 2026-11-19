@@ -1,6 +1,7 @@
 use std::{borrow::Cow, vec};
 use std::fmt;
 
+use crate::parse::lexemas::{TABLE_CENTER_ALT, TABLE_FUL_SEP_ALT, TABLE_LEFT_ALT, TABLE_RIGHT_ALT};
 use crate::parse::{block_fragmentation::{Block, BlockKind, Counters, InnerProjectLinks, split_blocks_from, unescape_image_path}, common::*, lexemas::{BULLET_LIST, MARK, NUMERIC_LIST, TAB, TAB_WIDTH, TABLE_CENTER, TABLE_FUL_SEP, TABLE_LEFT, TABLE_MERGE_LEFT_TAG, TABLE_MERGE_UP_LEFT_TAG, TABLE_MERGE_UP_TAG, TABLE_RIGHT, TABLE_SEP, is_blank}, line_parse::{InlineContext, InlinePreEl, PreSpan, PreStyle, PreparsedLines, generate_pre_spans, parse_note_line}};
 use crate::resources::{Resources, Id, ImageId, FileId};
 use crate::color::Color;
@@ -268,7 +269,11 @@ pub(crate) struct Table<'a> {
 impl<'a> Table<'a> {
     fn new(named: Named<Vec<Span<'a>>>, lines: Vec<&'a str>, outer_links: &Resources, inner_links: &InnerProjectLinks) -> Self {
         let sep = lines.iter()
-            .position(|l| TABLE_FUL_SEP.strip(l).is_some())
+            .position(|l| {
+                TABLE_FUL_SEP.strip(l).is_some() || TABLE_FUL_SEP_ALT.strip(l).is_some()
+            }).expect("table block without separator");
+        let format = TABLE_FUL_SEP.strip(lines[sep])
+            .or_else(|| TABLE_FUL_SEP_ALT.strip(lines[sep]))
             .expect("table block without separator");
         let parse_rows = |rows: &[&'a str]| -> Vec<Vec<TableEl<'a>>> {
             rows.iter().map(|l| Self::parse_table_line(l, outer_links, inner_links)).collect()
@@ -278,7 +283,7 @@ impl<'a> Table<'a> {
         let columns = headers.iter().map(Vec::len).max().unwrap_or(0);
         Self::normalize(&mut headers, columns);
         Self::normalize(&mut cells, columns);
-        let (aligments, widths) = Self::parse_format(TABLE_FUL_SEP.strip(lines[sep]).unwrap(), columns);
+        let (aligments, widths) = Self::parse_format(format, columns);
         Self { named, headers, aligments, widths, cells }
     }
 
@@ -337,9 +342,9 @@ impl<'a> Table<'a> {
         let mut chars = letter.chars();
         let aligment = match (chars.next().and_then(|c| c.to_uppercase().next()), chars.next()) {
             (None, _) => Aligment::default(),
-            (Some(TABLE_LEFT), None) => Aligment::Left,
-            (Some(TABLE_RIGHT), None) => Aligment::Right,
-            (Some(TABLE_CENTER), None) => Aligment::Center,
+            (Some(TABLE_LEFT), None) | (Some(TABLE_LEFT_ALT), None) => Aligment::Left,
+            (Some(TABLE_RIGHT), None) | (Some(TABLE_RIGHT_ALT), None) => Aligment::Right,
+            (Some(TABLE_CENTER), None) | (Some(TABLE_CENTER_ALT), None)=> Aligment::Center,
             _ => return (Aligment::default(), None)
         };
         (aligment, weight)

@@ -95,6 +95,7 @@ pub(super) fn style() -> Style {
         figure: around(LH / 2.0),
         images: Images { gap: 6.0, px: 0.75, broken_h: 3.0 * LH },
         formula: around(LH),
+        formula_cap: FormulaCap { role: paragraph, index_color: None, bar: None, head: None },
         code: Role { font: Font::MONO, min_first: 2, min_last: 2, ..Role { space_before: LH / 2.0, space_after: LH / 2.0, ..small } },
         code_head: None,
         code_frame: Frame { border: 0.75, pad_x: 6.0, pad_y: 4.0},

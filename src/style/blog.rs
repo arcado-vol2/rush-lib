@@ -163,7 +163,13 @@ fn styled(p: &Palette) -> Style {
 
         figure: around(LH / 2.0),
         images: Images { gap: 6.0, px: 0.75, broken_h: 3.0 * LH },
-        formula: around(LH / 2.0),
+        formula: Role { marg_before: LH / 2.0, marg_after: LH, squeeze: 14.0, bg_color: Some(p.code_bg), ..text },
+        formula_cap: FormulaCap {
+            role: Role { font: Font::BOLD, bg_color: Some(p.code_cap), text_color: Some(p.code_color), ..small },
+            index_color: Some(p.muted),
+            bar: None,
+            head: Some(CodeHead { rule: p.code_rule, rule_w: 0.75, pad: [4.0, 16.0, 4.0, 16.0], gap: 6.0 }),
+        },
         code: Role {
             font: Font::MONO, size: CODE, lh: CODE_LH, min_first: 2, min_last: 2,
             marg_before: LH / 2.0, marg_after: LH, squeeze: 14.0,

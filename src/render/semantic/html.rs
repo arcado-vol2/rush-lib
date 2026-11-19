@@ -6,7 +6,7 @@ use crate::render::ir::{self, Block, Caption, Cell, Link, ParaKind, Run, RunText
 use crate::render::warning::Feature;
 use crate::render::{css_fonts, escape, Semantic};
 use crate::resources::{FileId, Id, Resources};
-use crate::style::{Align, DirCase, Role, Style};
+use crate::style::{Align, DirCase, Role, Style, FORMULA_BAR};
 use crate::OutFile;
 use std::fmt::{self, Write};
 use std::path::Path;
@@ -80,7 +80,8 @@ fn role_rules(style: &Style) -> Vec<(&'static str, &Role, Option<String>, bool)>
         ("main .table td", &style.cell, None, false),
         ("main .table th", &style.head_cell, None, false),
         ("main .notes > .note", &style.notes.role, None, false),
-        ("main .formula > .name", &style.body, None, false),
+        ("main .formula > .name", &style.formula_cap.role, None, false),
+        ("main .formula > .cap", &style.formula_cap.role, None, false),
         ("main .table > .cap", &style.captions.table.role, None, false),
         ("main .figure > .cap", &style.captions.image.role, None, false),
         ("main .code > .cap", &style.captions.code.role, None, false),
@@ -109,6 +110,13 @@ fn palette_css(out: &mut String, style: &Style, scope: &str) {
     }
     for (s, cap) in [("main .table > .cap > .index", &style.captions.table), ("main .figure > .cap > .index", &style.captions.image), ("main .code > .cap > .index", &style.captions.code)] {
         let _ = writeln!(out, "{} {{ color: {}; }}", sel(s), color(cap.index_color, "inherit"));
+    }
+    let _ = writeln!(out, "{} {{ color: {}; }}", sel("main .formula .index"), color(style.formula_cap.index_color, "inherit"));
+    if let Some(bar) = style.formula_cap.bar {
+        let _ = writeln!(out, "{} {{ border-left: {}pt solid {}; }}", sel("main .formula"), FORMULA_BAR, bar.to_hex_tag());
+    }
+    if let Some(head) = &style.formula_cap.head {
+        let _ = writeln!(out, "{} {{ border-bottom-color: {}; }}", sel("main .formula > .cap"), head.rule.to_hex_tag());
     }
     let _ = writeln!(out, "{} {{ color: {}; }}", sel("main a.ext"), color(style.ext_link.color, "inherit"));
     let _ = writeln!(out, "{} {{ background-color: {}; }}", sel("main .mono"), color(style.mono_bg, "transparent"));
@@ -148,6 +156,7 @@ fn css(style: &Style) -> String {
     let ext = &style.ext_link;
     let _ = writeln!(out, "main a.ext {{ text-decoration: {}; }}", if ext.under { "underline" } else { "none" });
     code_css(&mut out, style);
+    formula_css(&mut out, style);
     table_css(&mut out, style);
     if !style.notes.rule {
         out.push_str("main .notes { background-image: none; }\n");
@@ -224,6 +233,24 @@ fn code_css(out: &mut String, style: &Style) {
         out.push_str("main .code > .cap > .index { flex: none; }\n");
         out.push_str("main .code > .cap > .name { flex: 1 1 auto; min-width: 0; }\n");
     }
+}
+
+fn formula_css(out: &mut String, style: &Style) {
+    let Some(head) = &style.formula_cap.head else { return };
+    // negative margins stretch the band over the box padding
+    let x = style.formula.squeeze;
+    let y = style.formula.squeeze_y();
+    let [top, right, bottom, left] = head.pad;
+    out.push_str("main .formula { overflow: hidden; }\n");
+    if style.code_radius > 0.0 {
+        let _ = writeln!(out, "main .formula {{ border-radius: {}pt; }}", style.code_radius);
+    }
+    let _ = writeln!(out, "main .formula > .cap {{ grid-row: 1; grid-column: 1; display: flex; align-items: baseline; gap: 1em; \
+        margin: -{y}pt -{x}pt {}pt; padding: {top}pt {right}pt {bottom}pt {left}pt; border-bottom: {}pt solid; }}",
+        head.gap, head.rule_w);
+    out.push_str("main .formula > .cap > .name { flex: 1 1 auto; min-width: 0; }\n");
+    out.push_str("main .formula > .cap > .index { flex: none; margin-left: auto; }\n");
+    let _ = writeln!(out, "main .formula > .body {{ overflow-x: auto; padding-bottom: {}pt; }}", head.gap);
 }
 
 fn table_css(out: &mut String, style: &Style) {
@@ -435,7 +462,16 @@ impl Writer<'_> {
             }
             Block::Formula { name, mathml, number, anchor, .. } => {
                 write!(out, "\t<div class=\"formula\" id=\"{}\">", anchor.id())?;
-                if let Some(name) = name {
+                let head = self.ctx.style.formula_cap.head.is_some();
+                if head {
+                    out.write_str("\n\t\t<div class=\"cap\"><span class=\"name\">")?;
+                    if let Some(name) = name {
+                        self.runs(out, name)?;
+                    }
+                    out.write_str("</span><span class=\"index\">")?;
+                    escape(out, number)?;
+                    out.write_str("</span></div>")?;
+                } else if let Some(name) = name {
                     out.write_str("\n\t\t<div class=\"name\">")?;
                     self.runs(out, name)?;
                     out.write_str("</div>")?;
@@ -445,9 +481,13 @@ impl Writer<'_> {
                     Some(m) => out.write_str(m)?,
                     None => out.write_str("<span class=\"error\">??</span>")?,
                 }
-                out.write_str("\n\t\t</div>\n\t\t<div class=\"index\">")?;
-                escape(out, number)?;
-                out.write_str("</div>\n\t</div>")
+                out.write_str("\n\t\t</div>")?;
+                if !head {
+                    out.write_str("\n\t\t<div class=\"index\">")?;
+                    escape(out, number)?;
+                    out.write_str("</div>")?;
+                }
+                out.write_str("\n\t</div>")
             }
             // TODO: add support with syntect
             Block::Code { caption, lines, anchor, lang: _lang } => {

@@ -5,7 +5,7 @@ use crate::config::DocOut;
 use crate::render::ir::{self, Anchor, Caption, Cell, Link, ParaKind, Run, RunText};
 use crate::render::warning::{Origin, RenderWarning, RenderWarningKind};
 use crate::resources::Resources;
-use crate::style::{Align, Grid, PageGeometry, Role, Style};
+use crate::style::{Align, Grid, PageGeometry, Role, Style, FORMULA_BAR};
 use std::collections::HashMap;
 
 pub(crate) struct Warn<'w> {
@@ -475,14 +475,45 @@ impl Flow {
     #[allow(clippy::too_many_arguments)]
     fn formula(&mut self, name: Option<&[Run]>, mathml: Option<&str>, src: &str, number: &str, anchor: &Anchor, ctx: &Ctx, file: &str, warn: &mut Warn) {
         let st = ctx.style;
+        let cap = &st.formula_cap;
         let w = ctx.width(&st.formula);
-        let (mut items, name_h, notes) = match name {
-            Some(runs) => {
-                let mut il = ctx.inline(&st.body);
-                ctx.runs(&mut il, runs, file, warn);
-                stack(il.lines(Layout::of(&st.body, w)))
+        let (x, y) = (st.formula.squeeze, st.formula.squeeze_y());
+        let index_line = |role: &Role| {
+            let mut num = ctx.single(number, role);
+            if let Some(c) = cap.index_color {
+                num.runs.iter_mut().for_each(|r| r.color = Some(c));
             }
-            None => (Vec::new(), 0.0, Vec::new()),
+            num
+        };
+        let name_lines = |width: f32, warn: &mut Warn| match name {
+            Some(runs) => {
+                let mut il = ctx.inline(&cap.role);
+                ctx.runs(&mut il, runs, file, warn);
+                il.lines(Layout::of(&cap.role, width))
+            }
+            None => Vec::new(),
+        };
+        let (mut items, name_h, notes) = match &cap.head {
+            Some(head) => {
+                let [top, right, bottom, left] = head.pad;
+                let full = w + 2.0 * x;
+                let mut num = index_line(&cap.role);
+                let (lines, text_h, notes) = stack(name_lines(full - left - right - num.natural - cap.role.size, warn));
+                let band_h = top + text_h.max(num.lh) + bottom;
+                let mut items: Vec<Item> = cap.role.bg_color.map(|color| Item::Fill { x: -x, y: -y, w: full, h: band_h, color }).into_iter().collect();
+                items.extend(lines.into_iter().map(|mut item| {
+                    item.shift(left - x, top - y);
+                    item
+                }));
+                num.x = full - x - right - num.natural;
+                items.push(Item::Line { y: top - y, line: num });
+                items.push(Item::Fill { x: -x, y: band_h - y - head.rule_w, w: full, h: head.rule_w, color: head.rule });
+                (items, band_h - y + head.gap, notes)
+            }
+            None => {
+                let (items, h, notes) = stack(name_lines(w, warn));
+                (items, if h > 0.0 { h + cap.role.space_after } else { 0.0 }, notes)
+            }
         };
         let h = approx_formula_height(src, st.body.size, st.body.lh);
         match mathml {
@@ -495,11 +526,17 @@ impl Flow {
                 }
             }
         }
-        let mut num = ctx.single(number, &st.body);
-        num.x = w - num.natural;
-        items.push(Item::Line { y: name_h + (h - num.lh) / 2.0, line: num });
+        if cap.head.is_none() {
+            let mut num = index_line(&st.body);
+            num.x = w - num.natural;
+            items.push(Item::Line { y: name_h + (h - num.lh) / 2.0, line: num });
+        }
+        if let Some(color) = cap.bar {
+            items.push(Item::Fill { x: -x, y: -y, w: FORMULA_BAR, h: name_h + h + 2.0 * y, color });
+        }
+        let tail = cap.head.map_or(0.0, |head| head.gap);
         self.push(Block {
-            pieces: vec![Piece { items, height: name_h + h, notes }],
+            pieces: vec![Piece { items, height: name_h + h + tail, notes }],
             id: Some(anchor.id()),
             ..spaced(&st.formula, Kind::Whole)
         }, file);

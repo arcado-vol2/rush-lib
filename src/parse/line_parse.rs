@@ -9,22 +9,22 @@ use crate::color::Color;
 impl Color {
     fn ru_color_const(line: &str) -> Option<Color> {
         match line {
-            "КРАС" => Some(Color::RED),
-            "ОРАН" => Some(Color::ORANGE),
-            "ЖЁЛ" | "ЖЕЛ" => Some(Color::YELLOW),
-            "ЗЕЛ" => Some(Color::GREEN),
-            "ГОЛ" => Some(Color::LIGHT_BLUE),
-            "СИН" => Some(Color::DARK_BLUE),
-            "ФИОЛ" => Some(Color::MAGENTA),
-            "РОЗ" => Some(Color::PINK),
-            "КОР" => Some(Color::BROWN),
-            "ЛИМ" => Some(Color::LEMON),
-            "САЛ" => Some(Color::CHARTREUSE),
-            "БИР" => Some(Color::CYAN),
-            "ЛАЗ" => Some(Color::LAZULI),
-            "ФУК" => Some(Color::FUCHSIA),
-            "БЕЛ" => Some(Color::WHITE),
-            "ЧЕРН" | "ЧЁРН" => Some(Color::BLACK),
+            "КРАС" | "RED" => Some(Color::RED),
+            "ОРАН" | "ORANGE" => Some(Color::ORANGE),
+            "ЖЁЛ" | "ЖЕЛ" | "YELLOW" => Some(Color::YELLOW),
+            "ЗЕЛ" | "GREEN" => Some(Color::GREEN),
+            "ГОЛ" | "LIGHTBLUE" => Some(Color::LIGHT_BLUE),
+            "СИН" | "BLUE" => Some(Color::DARK_BLUE),
+            "ФИОЛ" | "PURPLE" => Some(Color::PURPLE),
+            "РОЗ" | "PINK" => Some(Color::PINK),
+            "КОР" | "BROWN" => Some(Color::BROWN),
+            "ЛИМ" | "LEMON" => Some(Color::LEMON),
+            "САЛ" | "SALAT" => Some(Color::CHARTREUSE),
+            "БИР" | "CYAN" => Some(Color::CYAN),
+            "ЛАЗ" | "AZURE" => Some(Color::LAZULI),
+            "ФУК" | "MAGENTA" => Some(Color::MAGENTA),
+            "БЕЛ" | "WHITE" => Some(Color::WHITE),
+            "ЧЕРН" | "ЧЁРН" | "BLACK" => Some(Color::BLACK),
             _ => None
         }
     }

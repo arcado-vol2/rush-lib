@@ -1,13 +1,13 @@
-use crate::parse::lexemas::{FORMULA_REF, TABLE_REF, CODE_REF, IMAGE_REF};
+use crate::parse::lexemas::{CODE_REF, CODE_REF_ALT_1, CODE_REF_ALT_2, CODE_REF_ALT_3, FORMULA_REF, FORMULA_REF_ALT_1, IMAGE_REF, IMAGE_REF_ALT_1, IMAGE_REF_ALT_2, IMAGE_REF_ALT_3, TABLE_REF, TABLE_REF_ALT_1};
 
 
 
 pub(crate) fn ref_kind(c: char) -> Option<RefKind> {
     match c {
-        FORMULA_REF => Some(RefKind::Formula),
-        TABLE_REF => Some(RefKind::Table),
-        CODE_REF => Some(RefKind::Code),
-        IMAGE_REF => Some(RefKind::Image),
+        FORMULA_REF | FORMULA_REF_ALT_1 => Some(RefKind::Formula),
+        TABLE_REF | TABLE_REF_ALT_1  => Some(RefKind::Table),
+        CODE_REF | CODE_REF_ALT_1 | CODE_REF_ALT_2 | CODE_REF_ALT_3 => Some(RefKind::Code),
+        IMAGE_REF | IMAGE_REF_ALT_1 | IMAGE_REF_ALT_2 | IMAGE_REF_ALT_3 => Some(RefKind::Image),
         _ => None
     }
 }

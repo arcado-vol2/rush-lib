@@ -20,10 +20,14 @@ pub(crate) const UNDER: char = '=';
 pub(crate) const CODE: char = '/';
 pub(crate) const MONO: char = '!';
 pub(crate) const TABLE: char = '№';
+pub(crate) const TABLE_ALT: char = '#';
 pub(crate) const TABLE_FORMAT: char = '-';
 pub(crate) const TABLE_CENTER: char = 'Ц';
+pub(crate) const TABLE_CENTER_ALT: char = 'C';
 pub(crate) const TABLE_LEFT: char = 'Л'; 
+pub(crate) const TABLE_LEFT_ALT: char = 'L'; 
 pub(crate) const TABLE_RIGHT: char = 'П';
+pub(crate) const TABLE_RIGHT_ALT: char = 'R';
 pub(crate) const TABLE_SEP: char = '/';
 pub(crate) const TABLE_MERGE_LEFT: char = '+';
 pub(crate) const TABLE_MERGE_UP: char = '=';
@@ -80,12 +84,15 @@ pub(crate) const CODE_TAG: Tag<2> = Tag::repeat(CODE);
 pub(crate) const COMMENT_TAG: Tag<1> = Tag::repeat(COMMENT);
 pub(crate) const FORMUAL_TAG: Tag<1> = Tag::repeat(FORMULA);
 pub(crate) const TABLE_TAG: Tag<1> = Tag::repeat(TABLE);
+pub(crate) const TABLE_TAG_ALT: Tag<1> = Tag::repeat(TABLE_ALT);
 pub(crate) const NOTE_TAG: Tag<2> = Tag::repeat(NOTE);
 pub(crate) const BULLET_LIST_TAG: Tag<1> = Tag::repeat(BULLET_LIST);
 pub(crate) const NUMERIC_LIST_TAG: Tag<1> = Tag::repeat(NUMERIC_LIST);
 pub(crate) const ANON_NAME_TAG: Tag<1> = Tag::repeat(ANON);
 /// `\№-`
 pub(crate) const TABLE_FUL_SEP: Tag<3> = Tag::seq([MARK, TABLE, TABLE_FORMAT]);
+/// `\#-`
+pub(crate) const TABLE_FUL_SEP_ALT: Tag<3> = Tag::seq([MARK, TABLE_ALT, TABLE_FORMAT]);
 /// `\+=` or `\=+`
 pub(crate) const TABLE_MERGE_UP_LEFT_TAG: Tag<3, 2> = Tag::any([
     [MARK, TABLE_MERGE_LEFT, TABLE_MERGE_UP],
@@ -100,9 +107,17 @@ pub(crate) const TABLE_MERGE_UP_TAG: Tag<2> = Tag::seq([MARK, TABLE_MERGE_UP]);
 pub(crate) const TAB_WIDTH: u16 = 4;
 
 pub(crate) const FORMULA_REF: char = 'ф';
+pub(crate) const FORMULA_REF_ALT_1: char = 'f';
 pub(crate) const TABLE_REF: char = 'т';
+pub(crate) const TABLE_REF_ALT_1: char = 't';
 pub(crate) const CODE_REF: char = 'л';
+pub(crate) const CODE_REF_ALT_1: char = 'к';
+pub(crate) const CODE_REF_ALT_2: char = 'l';
+pub(crate) const CODE_REF_ALT_3: char = 'c';
 pub(crate) const IMAGE_REF: char = 'р';
+pub(crate) const IMAGE_REF_ALT_1: char = 'и';
+pub(crate) const IMAGE_REF_ALT_2: char = 'd';
+pub(crate) const IMAGE_REF_ALT_3: char = 'i';
 
 
 

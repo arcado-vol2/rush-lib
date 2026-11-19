@@ -289,9 +289,11 @@ impl<'a> ClassifiedLine<'a> {
                         return Self {raw, formated, thinned: rest, kind: LineKind::Comment};
                     } else if FORMUAL_TAG.is(first_w) {
                         return Self {raw, formated, thinned: rest, kind: LineKind::FormulaClose};
-                    } else if TABLE_TAG.is(first_w) {
+                    } else if TABLE_TAG.is(first_w) || TABLE_TAG_ALT.is(first_w){
                         return Self {raw, formated, thinned: rest, kind: LineKind::TableClose};
-                    } else if first_w.len() == 4 && first_w.starts_with(TABLE) && first_w.ends_with(TABLE_FORMAT) {
+                    } else if (first_w.len() == 4 && first_w.starts_with(TABLE) && first_w.ends_with(TABLE_FORMAT)) || 
+                              (first_w.len() == 2 && first_w.starts_with(TABLE_ALT) && first_w.ends_with(TABLE_FORMAT) )
+                    {
                         return Self {raw, formated, thinned: rest, kind: LineKind::TableFormat};
                     } 
                     else {
@@ -312,12 +314,14 @@ impl<'a> ClassifiedLine<'a> {
                         return Self { raw, formated, thinned: rest, kind: LineKind::CodeOpen};
                     } else if FORMUAL_TAG.is(first_w) {
                         return Self {raw, formated, thinned: rest, kind: LineKind::FormulaOpen};
-                    } else if TABLE_TAG.is(first_w) {
+                    } else if TABLE_TAG.is(first_w) || TABLE_TAG_ALT.is(first_w) {
                         return Self {raw, formated, thinned: rest, kind: LineKind::TableOpen};
                     } else if NUMERIC_LIST_TAG.is(first_w) || BULLET_LIST_TAG.is(first_w) {
                         return Self {raw, formated, thinned: rest, kind: LineKind::List};
                     }
-                    else if first_w.len() == 4 && first_w.starts_with(TABLE) && first_w.ends_with(TABLE_FORMAT) {
+                    else if (first_w.len() == 4 && first_w.starts_with(TABLE) && first_w.ends_with(TABLE_FORMAT)) || 
+                              (first_w.len() == 2 && first_w.starts_with(TABLE_ALT) && first_w.ends_with(TABLE_FORMAT) )
+                    {
                         return Self {raw, formated, thinned: rest, kind: LineKind::TableFormat};
                     } 
                 }
@@ -3314,6 +3318,38 @@ use crate::parse::{common::*, block_fragmentation::{FlatLexedProject, InnerProje
         ]);
         assert_eq!(out, expected);
     }
+
+    #[test]
+    fn block_check_table_alt() {
+        let source = "\\# 0\n/ a / b /\n\\#-\n/ c / d /\n\\#";
+        let out = split_blocks(source);
+         let expected = FlatLexedProject {
+            links: InnerProjectLinks { tables: anon(1), ..Default::default() },
+            blocks: vec![
+                Block {
+                    kind: BlockKind::Table(Named::Anonymous{index: 1}),
+                    lines: vec!["/ a / b /", "\\#-", "/ c / d /"]
+                }
+            ],
+            ..Default::default()
+        };
+        assert_eq!(out, expected);
+
+        let source = "\\# 0\n/ a / b /\n\\#- / 0 / 0 /\n/ c / d /\n\\#";
+        let out = split_blocks(source);
+         let expected = FlatLexedProject {
+            links: InnerProjectLinks { tables: anon(1), ..Default::default() },
+            blocks: vec![
+                Block {
+                    kind: BlockKind::Table(Named::Anonymous{index: 1}),
+                    lines: vec!["/ a / b /", "\\#- / 0 / 0 /", "/ c / d /"]
+                }
+            ],
+            ..Default::default()
+        };
+        assert_eq!(out, expected);
+    }
+
 
     fn kinds<'a>(out: &'a FlatLexedProject) -> Vec<&'a BlockKind<'a>> {
         out.blocks.iter().map(|b| &b.kind).collect()

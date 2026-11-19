@@ -366,6 +366,18 @@ pub(crate) struct CodeHead {
 }
 
 #[derive(Debug, Clone, Copy)]
+pub(crate) struct FormulaCap {
+    /// with a head, its background colors the band
+    pub(crate) role: Role,
+    pub(crate) index_color: Option<Color>,
+    pub(crate) bar: Option<Color>,
+    /// band over the formula box holding both the name and the number
+    pub(crate) head: Option<CodeHead>,
+}
+
+pub(crate) const FORMULA_BAR: f32 = 3.0;
+
+#[derive(Debug, Clone, Copy)]
 pub(crate) struct Style {
     pub(crate) name: DocStyle,
     pub(crate) fonts: Fonts,
@@ -403,6 +415,7 @@ pub(crate) struct Style {
     pub(crate) figure: Role,
     pub(crate) images: Images,
     pub(crate) formula: Role,
+    pub(crate) formula_cap: FormulaCap,
     pub(crate) code: Role,
     /// code caption as a header band; without it the caption stays in the code box
     pub(crate) code_head: Option<CodeHead>,
